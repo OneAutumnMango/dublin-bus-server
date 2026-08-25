@@ -1,9 +1,7 @@
 package dev.dublinbustracker.server
 
 import dev.dublinbustracker.data.GtfsStaticData
-import dev.dublinbustracker.data.NtaArrivalsRepository
 import dev.dublinbustracker.data.RealtimeGtfsClient
-import dev.dublinbustracker.data.StopRepository
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
@@ -13,28 +11,68 @@ import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import org.slf4j.LoggerFactory
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+private const val STATIC_RESOURCE_NAME = "gtfs_static.json"
 
 fun main() {
+    val logger = LoggerFactory.getLogger("dev.dublinbustracker.server.Main")
     val config = ServerConfig.fromEnv()
-    val gtfsStaticData = GtfsStaticData.parse(
-        requireNotNull(object {}.javaClass.classLoader.getResourceAsStream("gtfs_static.json")) {
-            "gtfs_static.json not found on the classpath - run scripts/fetch-gtfs-data.sh first"
-        }.bufferedReader().readText(),
+
+    config.validate().forEach { warning ->
+        if (config.allowUnsafePollRate) {
+            logger.warn(warning)
+        } else {
+            error("$warning. Set ALLOW_UNSAFE_POLL_RATE=true to override.")
+        }
+    }
+
+    val staticData = loadStaticData(config.gtfsStaticPath)
+    logger.info("Loaded static GTFS: {}", staticData.stats())
+
+    val httpClient = OkHttpClient.Builder()
+        .callTimeout(60, TimeUnit.SECONDS)
+        .build()
+    val client = RealtimeGtfsClient(config.ntaApiKeys, httpClient, config.gtfsBaseUrl)
+    val services = AppServices.build(config, staticData, client)
+
+    logger.info(
+        "Polling {} every {}ms ({} upstream calls/min across {} key(s)); retaining {} snapshots per feed",
+        config.feeds.joinToString(),
+        config.pollIntervalMs,
+        "%.2f".format(config.upstreamCallsPerMinute),
+        config.ntaApiKeys.size,
+        config.historyDepth,
     )
-    val stopRepository = StopRepository(gtfsStaticData)
-    val feedCache = FeedCache(NtaArrivalsRepository(RealtimeGtfsClient(config.ntaApiKeys), gtfsStaticData))
 
-    // Serve real data from the first request onward instead of an empty cache.
-    runBlocking { feedCache.refresh() }
+    // Warm the cache so the first client request is served real data.
+    runBlocking { services.poller.refreshAll() }
 
-    embeddedServer(Netty, port = config.port) {
-        configureServer(config, feedCache, stopRepository)
-    }.start(wait = true)
+    embeddedServer(Netty, port = config.port) { configureServer(services) }.start(wait = true)
 }
 
-fun Application.configureServer(config: ServerConfig, feedCache: FeedCache, stopRepository: StopRepository) {
-    install(ContentNegotiation) { json() }
+fun loadStaticData(path: String?): GtfsStaticData {
+    val text = if (path != null) {
+        val file = File(path)
+        require(file.isFile) {
+            "GTFS_STATIC_PATH=$path not found - run scripts/fetch-gtfs-data.sh to generate it"
+        }
+        file.readText()
+    } else {
+        val stream = GtfsStaticData::class.java.classLoader.getResourceAsStream(STATIC_RESOURCE_NAME)
+            ?: error("$STATIC_RESOURCE_NAME missing from the classpath - run scripts/fetch-gtfs-data.sh first")
+        stream.bufferedReader().use { it.readText() }
+    }
+    return GtfsStaticData.parse(text)
+}
+
+fun Application.configureServer(services: AppServices) {
+    install(ContentNegotiation) { json(Json { encodeDefaults = true; explicitNulls = false }) }
     install(CallLogging)
-    feedCache.startPolling(this)
-    routing { configureRoutes(config, feedCache, stopRepository) }
+    services.poller.start(this)
+    routing { configureRoutes(services) }
 }

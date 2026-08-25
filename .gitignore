@@ -15,3 +15,8 @@ src/main/resources/gtfs_static.json
 
 # OS
 .DS_Store
+
+# Corporate CA certs for Docker builds behind a TLS proxy (keep the dir, not the certs)
+certs/*
+!certs/.gitkeep
+!certs/README.md

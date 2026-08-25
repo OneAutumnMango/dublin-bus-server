@@ -1,0 +1,12 @@
+.git
+.gradle
+.kotlin
+build
+apks
+server.env
+
+# Regenerated inside the container onto the /data volume.
+src/main/resources/gtfs_static.json
+
+.idea
+*.iml

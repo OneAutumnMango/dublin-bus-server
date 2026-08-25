@@ -1,0 +1,21 @@
+services:
+  dublin-bus-server:
+    build: .
+    image: dublin-bus-server:latest
+    container_name: dublin-bus-server
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - server.env
+    environment:
+      # Feeds to poll, and how hard to poll them. See README for the safe-rate rules.
+      FEEDS: "${FEEDS:-TRIP_UPDATES,VEHICLES}"
+      POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-}"
+      HISTORY_DEPTH: "${HISTORY_DEPTH:-30}"
+      GTFS_STATIC_PATH: /data/gtfs_static.json
+    volumes:
+      - gtfs-data:/data
+
+volumes:
+  gtfs-data:

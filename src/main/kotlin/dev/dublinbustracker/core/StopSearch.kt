@@ -18,6 +18,22 @@ object StopSearch {
 
     fun nearestStops(lat: Double, lon: Double, stops: List<Stop>, limit: Int): List<Stop> =
         stops.sortedBy { haversineMeters(lat, lon, it.lat, it.lon) }.take(limit)
+
+    /** Stops within [radiusMeters], nearest first. */
+    fun stopsWithinRadius(
+        lat: Double,
+        lon: Double,
+        stops: List<Stop>,
+        radiusMeters: Double,
+        limit: Int,
+    ): List<Stop> =
+        stops.asSequence()
+            .map { it to haversineMeters(lat, lon, it.lat, it.lon) }
+            .filter { (_, distance) -> distance <= radiusMeters }
+            .sortedBy { (_, distance) -> distance }
+            .take(limit)
+            .map { (stop, _) -> stop }
+            .toList()
 }
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
