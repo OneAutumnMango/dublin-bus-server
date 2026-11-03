@@ -1,8 +1,10 @@
 package dev.dublinbustracker.data
 
 import dev.dublinbustracker.support.Fixtures
+import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -101,5 +103,57 @@ class GtfsStaticDataTest {
         assertEquals(1, minimal.allStops().size)
         assertEquals(emptyList(), minimal.allRoutes())
         assertNotNull(minimal.stopById("a"))
+    }
+
+    @Test
+    fun `scheduled calls for a stop come from stopSchedule`() {
+        val bundle = GtfsStaticData.parse(
+            """{"version":3,"stops":[],"stopSchedule":{"s1":[{"t":"t1","s":28800},{"t":"t2","s":30000}]}}""",
+        )
+        assertEquals(
+            listOf("t1" to 28800, "t2" to 30000),
+            bundle.scheduledCallsForStop("s1").map { it.tripId to it.arrivalSecondsSinceMidnight },
+        )
+        assertEquals(emptyList(), bundle.scheduledCallsForStop("unknown"))
+    }
+
+    @Test
+    fun `a service is active on its weekly pattern within its date range`() {
+        val bundle = GtfsStaticData.parse(
+            """{"version":3,"stops":[],
+               |"services":{"weekday":{"weekdays":"1111100","start":"20240101","end":"20241231"}}}
+            """.trimMargin(),
+        )
+        assertTrue(bundle.isServiceActive("weekday", LocalDate.of(2024, 1, 10))) // Wednesday
+        assertFalse(bundle.isServiceActive("weekday", LocalDate.of(2024, 1, 13))) // Saturday
+        assertFalse(bundle.isServiceActive("weekday", LocalDate.of(2023, 12, 31))) // before start
+        assertFalse(bundle.isServiceActive("weekday", LocalDate.of(2025, 1, 1))) // after end
+    }
+
+    @Test
+    fun `an added date in calendar_dates runs even outside the weekly pattern`() {
+        val bundle = GtfsStaticData.parse(
+            """{"version":3,"stops":[],
+               |"services":{"svc":{"weekdays":"0000000","start":"20240101","end":"20241231","added":["20240115"]}}}
+            """.trimMargin(),
+        )
+        assertTrue(bundle.isServiceActive("svc", LocalDate.of(2024, 1, 15)))
+        assertFalse(bundle.isServiceActive("svc", LocalDate.of(2024, 1, 16)))
+    }
+
+    @Test
+    fun `a removed date is excluded even if the weekly pattern would include it`() {
+        val bundle = GtfsStaticData.parse(
+            """{"version":3,"stops":[],
+               |"services":{"svc":{"weekdays":"1111111","start":"20240101","end":"20241231","removed":["20240110"]}}}
+            """.trimMargin(),
+        )
+        assertFalse(bundle.isServiceActive("svc", LocalDate.of(2024, 1, 10)))
+        assertTrue(bundle.isServiceActive("svc", LocalDate.of(2024, 1, 11)))
+    }
+
+    @Test
+    fun `an unknown service is never active`() {
+        assertFalse(data.isServiceActive("ghost", LocalDate.of(2024, 1, 1)))
     }
 }

@@ -24,6 +24,7 @@ data class Trip(
     val headsign: String,
     val directionId: String,
     val shapeId: String,
+    val serviceId: String = "",
 )
 
 data class Arrival(

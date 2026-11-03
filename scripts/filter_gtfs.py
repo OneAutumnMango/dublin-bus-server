@@ -1,17 +1,23 @@
 """Filters a static GTFS extract down to the agencies matching a regex and writes a
 compact JSON bundle the server loads at startup.
 
-Emitted bundle (schema version 2):
+Emitted bundle (schema version 3):
   stops         [{id, code, name, lat, lon}]
   routes        [{id, shortName, longName, agencyId}]
-  trips         {tripId: {routeId, headsign, directionId, shapeId}}
+  trips         {tripId: {routeId, headsign, directionId, shapeId, serviceId}}
   shapes        {shapeId: googleEncodedPolyline}
   routePatterns {routeId: {directionId: [stopId, ...]}}
   stopRoutes    {stopId: [routeShortName, ...]}
+  services      {serviceId: {weekdays: "1111100", start, end, added: [date,...], removed: [date,...]}}
+  stopSchedule  {stopId: [{t: tripId, s: secondsSinceMidnight}, ...], sorted by s}
 
 shapes.txt and stop_times.txt are hundreds of MB, so shapes are deduplicated and
 polyline-encoded, and stop patterns are reduced to one representative trip per
-route/direction rather than retaining every trip's stop times.
+route/direction rather than retaining every trip's stop times. stopSchedule is the
+exception: it needs every kept trip's scheduled time at every stop, so the server can
+fall back to "due at HH:MM" when a trip hasn't shown up in the realtime feed yet (e.g.
+it hasn't left its terminus). That makes it the largest part of the bundle - use
+--no-schedule to drop it on a tighter disk/memory budget.
 """
 import argparse
 import csv
@@ -35,6 +41,46 @@ def read_csv(path):
 def stream_csv(path):
     with open(path, newline="", encoding="utf-8-sig") as f:
         yield from csv.DictReader(f)
+
+
+def parse_gtfs_time(value):
+    """GTFS allows hours >= 24 for a trip that runs past midnight under the previous
+    service day, so this is plain seconds-since-midnight, not wall-clock time."""
+    h, m, s = value.split(":")
+    return int(h) * 3600 + int(m) * 60 + int(s)
+
+
+def collect_services(gtfs_dir):
+    """calendar.txt (weekly pattern) plus calendar_dates.txt (per-date exceptions).
+    Either file may be absent - some feeds use only one of the two."""
+    services = {}
+
+    def service(service_id):
+        return services.setdefault(
+            service_id, {"weekdays": "0000000", "start": "", "end": "", "added": [], "removed": []}
+        )
+
+    try:
+        for row in read_csv(f"{gtfs_dir}/calendar.txt"):
+            svc = service(row["service_id"])
+            svc["weekdays"] = "".join(
+                row[day] for day in
+                ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+            )
+            svc["start"] = row["start_date"]
+            svc["end"] = row["end_date"]
+    except FileNotFoundError:
+        pass
+
+    try:
+        for row in stream_csv(f"{gtfs_dir}/calendar_dates.txt"):
+            svc = service(row["service_id"])
+            key = "added" if row["exception_type"] == "1" else "removed"
+            svc[key].append(row["date"])
+    except FileNotFoundError:
+        pass
+
+    return services
 
 
 def encode_polyline(points, precision=5):
@@ -62,11 +108,12 @@ def select_agencies(gtfs_dir, pattern):
     return {r["agency_id"] for r in agencies}
 
 
-def scan_stop_times(gtfs_dir, trip_route, trip_direction, route_short_names, candidates):
+def scan_stop_times(gtfs_dir, trip_route, trip_direction, route_short_names, candidates, collect_schedule):
     """Single pass over the largest file, collecting everything that depends on it."""
     served_stop_ids = set()
     stop_routes = defaultdict(set)
     candidate_sequences = defaultdict(list)
+    stop_schedule = defaultdict(list)
 
     for row in stream_csv(f"{gtfs_dir}/stop_times.txt"):
         trip_id = row["trip_id"]
@@ -80,6 +127,10 @@ def scan_stop_times(gtfs_dir, trip_route, trip_direction, route_short_names, can
             stop_routes[stop_id].add(short_name)
         if trip_id in candidates:
             candidate_sequences[trip_id].append((int(row["stop_sequence"]), stop_id))
+        if collect_schedule:
+            time_str = row.get("arrival_time") or row.get("departure_time")
+            if time_str:
+                stop_schedule[stop_id].append((trip_id, parse_gtfs_time(time_str)))
 
     patterns = defaultdict(dict)
     for trip_id, stops in candidate_sequences.items():
@@ -91,7 +142,10 @@ def scan_stop_times(gtfs_dir, trip_route, trip_direction, route_short_names, can
         if existing is None or len(ordered) > len(existing):
             patterns[route_id][direction] = ordered
 
-    return served_stop_ids, stop_routes, patterns
+    for stop_id in stop_schedule:
+        stop_schedule[stop_id].sort(key=lambda pair: pair[1])
+
+    return served_stop_ids, stop_routes, patterns, stop_schedule
 
 
 def collect_shapes(gtfs_dir, wanted_shape_ids):
@@ -116,6 +170,10 @@ def main():
     parser.add_argument("agency_pattern")
     parser.add_argument("--no-shapes", action="store_true", help="skip route geometry (smaller bundle)")
     parser.add_argument("--no-patterns", action="store_true", help="skip per-route stop sequences")
+    parser.add_argument(
+        "--no-schedule", action="store_true",
+        help="skip the scheduled-time fallback (by far the largest part of the bundle)",
+    )
     args = parser.parse_args()
 
     pattern = re.compile(args.agency_pattern, re.IGNORECASE)
@@ -137,9 +195,11 @@ def main():
         for trip_ids in grouped.values():
             candidates.update(sorted(trip_ids)[:CANDIDATES_PER_PATTERN])
 
-    served_stop_ids, stop_routes, patterns = scan_stop_times(
-        args.gtfs_dir, trip_route, trip_direction, route_short_names, candidates
+    served_stop_ids, stop_routes, patterns, stop_schedule = scan_stop_times(
+        args.gtfs_dir, trip_route, trip_direction, route_short_names, candidates, not args.no_schedule
     )
+
+    services = collect_services(args.gtfs_dir) if not args.no_schedule else {}
 
     stops = sorted(
         (
@@ -161,7 +221,7 @@ def main():
         shapes = collect_shapes(args.gtfs_dir, {r["shape_id"] for r in trips if r.get("shape_id")})
 
     bundle = {
-        "version": 2,
+        "version": 3,
         "stops": stops,
         "routes": [
             {
@@ -178,20 +238,28 @@ def main():
                 "headsign": r.get("trip_headsign", ""),
                 "directionId": r.get("direction_id") or "0",
                 "shapeId": r.get("shape_id") or "",
+                "serviceId": r.get("service_id") or "",
             }
             for r in trips
         },
         "shapes": shapes,
         "routePatterns": {route_id: dict(dirs) for route_id, dirs in patterns.items()},
         "stopRoutes": {stop_id: sorted(names) for stop_id, names in stop_routes.items()},
+        "services": services,
+        "stopSchedule": {
+            stop_id: [{"t": trip_id, "s": seconds} for trip_id, seconds in calls]
+            for stop_id, calls in stop_schedule.items()
+        },
     }
 
     with open(args.out_file, "w", encoding="utf-8") as f:
         json.dump(bundle, f, ensure_ascii=False, separators=(",", ":"))
 
+    schedule_calls = sum(len(v) for v in bundle["stopSchedule"].values())
     print(
         f"stops={len(stops)} routes={len(bundle['routes'])} trips={len(bundle['trips'])} "
-        f"shapes={len(shapes)} patterns={len(bundle['routePatterns'])}"
+        f"shapes={len(shapes)} patterns={len(bundle['routePatterns'])} "
+        f"services={len(services)} scheduledCalls={schedule_calls}"
     )
 
 

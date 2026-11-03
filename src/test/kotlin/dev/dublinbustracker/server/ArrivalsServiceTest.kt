@@ -4,8 +4,10 @@ import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.StaticDataRef
 import dev.dublinbustracker.support.Fixtures
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -181,5 +183,94 @@ class ArrivalsServiceTest {
 
         assertEquals(1, service.arrivalsForStop("s1").size)
         assertNull(store.latest(FeedKind.TRIP_UPDATES))
+    }
+
+    // --- scheduled fallback (no realtime update yet) ---------------------------
+
+    // Wednesday, and Dublin runs no DST in January, so this is also UTC+0 local time.
+    private val wednesdayMorning = Instant.parse("2024-01-10T08:00:00Z").epochSecond
+    private val secondsSinceDublinMidnight = 8 * 3600 // matches wednesdayMorning, 08:00
+
+    private fun bundleWithSchedule(weekdays: String, scheduledSeconds: Int): String =
+        """{"version":3,
+           |"routes":[{"id":"r1","shortName":"15","longName":"","agencyId":"a1"}],
+           |"trips":{"t1":{"routeId":"r1","headsign":"Merrion Square","directionId":"0","shapeId":"","serviceId":"svc"}},
+           |"services":{"svc":{"weekdays":"$weekdays","start":"20240101","end":"20241231"}},
+           |"stopSchedule":{"s1":[{"t":"t1","s":$scheduledSeconds}]}}
+        """.trimMargin()
+
+    private fun scheduledService(bundleJson: String, now: Long = wednesdayMorning): ArrivalsService =
+        ArrivalsService(FeedStore(historyDepth = 5), StaticDataRef(GtfsStaticData.parse(bundleJson)), nowEpochSeconds = { now })
+
+    @Test
+    fun `a trip with no realtime update falls back to its scheduled time`() {
+        val svc = scheduledService(bundleWithSchedule("1111100", secondsSinceDublinMidnight + 10 * 60))
+
+        val arrival = svc.arrivalsForStop("s1").single()
+
+        assertEquals("t1", arrival.tripId)
+        assertFalse(arrival.isRealtime)
+        assertEquals(10, arrival.dueMinutes)
+        assertEquals("15", arrival.routeShortName)
+        assertEquals("Merrion Square", arrival.destination)
+    }
+
+    @Test
+    fun `a realtime update for the same trip suppresses its scheduled fallback`() {
+        val store = FeedStore(historyDepth = 5)
+        val staticData = StaticDataRef(GtfsStaticData.parse(bundleWithSchedule("1111100", secondsSinceDublinMidnight + 600)))
+        val svc = ArrivalsService(store, staticData, nowEpochSeconds = { wednesdayMorning })
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + 300)),
+                ),
+            ),
+        )
+
+        val arrivals = svc.arrivalsForStop("s1")
+
+        assertEquals(1, arrivals.size)
+        assertTrue(arrivals.single().isRealtime)
+    }
+
+    @Test
+    fun `a scheduled call for a service not running today is excluded`() {
+        // "0000011" is Saturday and Sunday only; the fixed "now" above is a Wednesday.
+        val svc = scheduledService(bundleWithSchedule("0000011", secondsSinceDublinMidnight + 600))
+
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+    }
+
+    @Test
+    fun `a scheduled call beyond the lookahead window is excluded`() {
+        val svc = scheduledService(bundleWithSchedule("1111100", secondsSinceDublinMidnight + 100 * 60))
+
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+    }
+
+    @Test
+    fun `a scheduled call just past is still shown within the grace window`() {
+        val svc = scheduledService(bundleWithSchedule("1111100", secondsSinceDublinMidnight - 60))
+
+        assertEquals(0, svc.arrivalsForStop("s1").single().dueMinutes)
+    }
+
+    @Test
+    fun `a scheduled call well past the grace window is excluded`() {
+        val svc = scheduledService(bundleWithSchedule("1111100", secondsSinceDublinMidnight - 5 * 60))
+
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+    }
+
+    @Test
+    fun `scheduled fallback honours the route filter`() {
+        val svc = scheduledService(bundleWithSchedule("1111100", secondsSinceDublinMidnight + 600))
+
+        assertEquals(1, svc.arrivalsForStop("s1", routeFilter = "15").size)
+        assertEquals(emptyList(), svc.arrivalsForStop("s1", routeFilter = "999"))
     }
 }
