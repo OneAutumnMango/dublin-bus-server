@@ -3,6 +3,7 @@ package dev.dublinbustracker.server
 import dev.dublinbustracker.core.LatLon
 import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.GtfsStaticData
+import dev.dublinbustracker.data.StaticDataRef
 import dev.dublinbustracker.support.Fixtures
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -11,7 +12,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class VehicleServiceTest {
-    private val staticData = GtfsStaticData.parse(Fixtures.staticBundleJson())
+    private val staticData = StaticDataRef(GtfsStaticData.parse(Fixtures.staticBundleJson()))
     private val store = FeedStore(historyDepth = 5)
     private val service = VehicleService(store, staticData)
 

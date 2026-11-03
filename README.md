@@ -57,6 +57,7 @@ All configuration is environment variables (see `server.env.example`).
 | `HISTORY_DEPTH` | `30` | Snapshots retained per feed |
 | `ALLOW_UNSAFE_POLL_RATE` | `false` | Permit exceeding the fair-usage limit |
 | `GTFS_STATIC_PATH` | bundled resource | Where the static bundle lives |
+| `GTFS_REFRESH_INTERVAL_HOURS` | `24` | How often the static bundle re-fetches itself (see below) |
 | `GTFSR_BASE_URL` | NTA v2 endpoint | Override for testing |
 | `NTFY_URL` | – | Push URL for a self-hosted [ntfy](https://ntfy.sh) topic. Blank disables alerting |
 | `NTFY_LEVEL` | `info` | How much to push: `off`, `error`, `warn`, `info` (see below) |
@@ -170,6 +171,13 @@ agencies, producing a ~36MB JSON bundle. `shapes.txt` and `stop_times.txt` domin
 so the script deduplicates and polyline-encodes shapes, and reduces stop times to one
 representative stop pattern per route and direction rather than retaining all 248k trips'
 timetables. Use `--no-shapes` or `--no-patterns` for a smaller bundle.
+
+NTA revises the static schedule periodically, and when it does, the GTFS-Realtime feed's trip
+ids stop matching the bundle - trip headsigns go blank and `/v1/trips/{id}` 404s, even though
+stops, routes and vehicle positions are unaffected (they resolve by route/stop id, not trip id).
+The server re-runs this same pipeline on its own every `GTFS_REFRESH_INTERVAL_HOURS` (default
+24) and hot-swaps the result in, so this self-heals without a restart. A failed refresh just
+logs (and pushes a `warn`-level alert if `NTFY_URL` is set) and keeps serving the old bundle.
 
 ## Notes
 

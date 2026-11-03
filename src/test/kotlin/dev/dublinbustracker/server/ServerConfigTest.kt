@@ -24,6 +24,7 @@ class ServerConfigTest {
         assertEquals(120_000L, config.minimumSafePollIntervalMs)
         assertEquals(8080, config.port)
         assertEquals(ServerConfig.DEFAULT_HISTORY_DEPTH, config.historyDepth)
+        assertEquals(ServerConfig.DEFAULT_GTFS_REFRESH_INTERVAL_HOURS, config.gtfsRefreshIntervalHours)
     }
 
     @Test
@@ -60,11 +61,13 @@ class ServerConfigTest {
             "PORT" to "",
             "GTFS_STATIC_PATH" to "",
             "FEEDS" to "",
+            "GTFS_REFRESH_INTERVAL_HOURS" to "",
         )
         assertEquals(120_000L, config.pollIntervalMs)
         assertEquals(ServerConfig.DEFAULT_HISTORY_DEPTH, config.historyDepth)
         assertEquals(8080, config.port)
         assertNull(config.gtfsStaticPath)
+        assertEquals(ServerConfig.DEFAULT_GTFS_REFRESH_INTERVAL_HOURS, config.gtfsRefreshIntervalHours)
     }
 
     @Test
@@ -74,11 +77,13 @@ class ServerConfigTest {
             "HISTORY_DEPTH" to "120",
             "POLL_INTERVAL_MS" to "180000",
             "GTFS_STATIC_PATH" to "/data/gtfs.json",
+            "GTFS_REFRESH_INTERVAL_HOURS" to "6",
         )
         assertEquals(9000, config.port)
         assertEquals(120, config.historyDepth)
         assertEquals(180_000L, config.pollIntervalMs)
         assertEquals("/data/gtfs.json", config.gtfsStaticPath)
+        assertEquals(6L, config.gtfsRefreshIntervalHours)
     }
 
     @Test
@@ -113,5 +118,7 @@ class ServerConfigTest {
         assertFailsWith<IllegalStateException> { config("POLL_INTERVAL_MS" to "0") }
         assertFailsWith<IllegalStateException> { config("HISTORY_DEPTH" to "0") }
         assertFailsWith<IllegalStateException> { config("PORT" to "70000") }
+        assertFailsWith<IllegalStateException> { config("GTFS_REFRESH_INTERVAL_HOURS" to "0") }
+        assertFailsWith<IllegalStateException> { config("GTFS_REFRESH_INTERVAL_HOURS" to "soon") }
     }
 }

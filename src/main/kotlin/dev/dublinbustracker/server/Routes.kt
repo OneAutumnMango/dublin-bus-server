@@ -32,7 +32,7 @@ fun Routing.configureRoutes(services: AppServices) {
 
     get("/stops") {
         val query = call.request.queryParameters["query"].orEmpty()
-        call.respond(StopSearch.search(staticData.allStops(), query).map { it.toResponse() })
+        call.respond(StopSearch.search(staticData.current.allStops(), query).map { it.toResponse() })
     }
 
     route("/v1") {
@@ -43,8 +43,8 @@ fun Routing.configureRoutes(services: AppServices) {
         get("/stops") {
             val query = call.request.queryParameters["query"].orEmpty()
             val limit = call.limit()
-            val matches = StopSearch.search(staticData.allStops(), query).take(limit)
-            call.respond(matches.map { it.toResponse(staticData.routesServingStop(it.id)) })
+            val matches = StopSearch.search(staticData.current.allStops(), query).take(limit)
+            call.respond(matches.map { it.toResponse(staticData.current.routesServingStop(it.id)) })
         }
 
         get("/stops/nearby") {
@@ -55,21 +55,21 @@ fun Routing.configureRoutes(services: AppServices) {
                 return@get
             }
             val radius = call.request.queryParameters["radius"]?.toDoubleOrNull() ?: DEFAULT_NEARBY_RADIUS_METERS
-            val nearby = StopSearch.stopsWithinRadius(lat, lon, staticData.allStops(), radius, call.limit())
-            call.respond(nearby.map { it.toResponse(staticData.routesServingStop(it.id)) })
+            val nearby = StopSearch.stopsWithinRadius(lat, lon, staticData.current.allStops(), radius, call.limit())
+            call.respond(nearby.map { it.toResponse(staticData.current.routesServingStop(it.id)) })
         }
 
         get("/stops/{stopId}") {
-            val stop = staticData.stopByIdOrCode(call.parameters["stopId"].orEmpty())
+            val stop = staticData.current.stopByIdOrCode(call.parameters["stopId"].orEmpty())
             if (stop == null) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown stop"))
                 return@get
             }
-            call.respond(stop.toResponse(staticData.routesServingStop(stop.id)))
+            call.respond(stop.toResponse(staticData.current.routesServingStop(stop.id)))
         }
 
         get("/stops/{stopId}/arrivals") {
-            val stop = staticData.stopByIdOrCode(call.parameters["stopId"].orEmpty())
+            val stop = staticData.current.stopByIdOrCode(call.parameters["stopId"].orEmpty())
             if (stop == null) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown stop"))
                 return@get
@@ -80,7 +80,7 @@ fun Routing.configureRoutes(services: AppServices) {
 
         get("/routes") {
             val query = call.request.queryParameters["query"]?.trim().orEmpty()
-            val matches = staticData.allRoutes().filter {
+            val matches = staticData.current.allRoutes().filter {
                 query.isEmpty() ||
                     it.shortName.contains(query, ignoreCase = true) ||
                     it.longName.contains(query, ignoreCase = true)
@@ -89,7 +89,7 @@ fun Routing.configureRoutes(services: AppServices) {
         }
 
         get("/routes/{route}") {
-            val routes = staticData.resolveRoutes(call.parameters["route"].orEmpty())
+            val routes = staticData.current.resolveRoutes(call.parameters["route"].orEmpty())
             if (routes.isEmpty()) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown route"))
                 return@get
@@ -98,27 +98,27 @@ fun Routing.configureRoutes(services: AppServices) {
         }
 
         get("/routes/{route}/stops") {
-            val route = staticData.resolveRoutes(call.parameters["route"].orEmpty()).firstOrNull()
+            val route = staticData.current.resolveRoutes(call.parameters["route"].orEmpty()).firstOrNull()
             if (route == null) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown route"))
                 return@get
             }
             val wantedDirection = call.request.queryParameters["direction"]
-            val directions = staticData.patternsForRoute(route.id)
+            val directions = staticData.current.patternsForRoute(route.id)
                 .filterKeys { wantedDirection == null || it == wantedDirection }
                 .mapValues { (_, stopIds) ->
-                    stopIds.mapNotNull { staticData.stopById(it) }.map { it.toResponse() }
+                    stopIds.mapNotNull { staticData.current.stopById(it) }.map { it.toResponse() }
                 }
             call.respond(RouteStopsResponse(route.id, route.shortName, directions))
         }
 
         get("/routes/{route}/shape") {
-            val route = staticData.resolveRoutes(call.parameters["route"].orEmpty()).firstOrNull()
+            val route = staticData.current.resolveRoutes(call.parameters["route"].orEmpty()).firstOrNull()
             if (route == null) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown route"))
                 return@get
             }
-            val shapeId = staticData.shapeIdForRoute(route.id, call.request.queryParameters["direction"])
+            val shapeId = staticData.current.shapeIdForRoute(route.id, call.request.queryParameters["direction"])
             if (shapeId == null) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("no shape for this route"))
                 return@get
@@ -128,7 +128,7 @@ fun Routing.configureRoutes(services: AppServices) {
 
         get("/routes/{route}/vehicles") {
             val identifier = call.parameters["route"].orEmpty()
-            if (staticData.resolveRoutes(identifier).isEmpty()) {
+            if (staticData.current.resolveRoutes(identifier).isEmpty()) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown route"))
                 return@get
             }
@@ -180,7 +180,7 @@ fun Routing.configureRoutes(services: AppServices) {
 
         get("/trips/{tripId}") {
             val tripId = call.parameters["tripId"].orEmpty()
-            val trip = staticData.trip(tripId)
+            val trip = staticData.current.trip(tripId)
             if (trip == null) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown trip"))
                 return@get
@@ -189,7 +189,7 @@ fun Routing.configureRoutes(services: AppServices) {
                 TripResponse(
                     tripId = trip.id,
                     routeId = trip.routeId,
-                    routeShortName = staticData.routeShortName(trip.routeId),
+                    routeShortName = staticData.current.routeShortName(trip.routeId),
                     headsign = trip.headsign,
                     directionId = trip.directionId,
                     shapeId = trip.shapeId,
@@ -200,7 +200,7 @@ fun Routing.configureRoutes(services: AppServices) {
         }
 
         get("/trips/{tripId}/shape") {
-            val trip = staticData.trip(call.parameters["tripId"].orEmpty())
+            val trip = staticData.current.trip(call.parameters["tripId"].orEmpty())
             if (trip == null || trip.shapeId.isEmpty()) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown trip or no shape"))
                 return@get
@@ -213,7 +213,7 @@ fun Routing.configureRoutes(services: AppServices) {
             val stopFilter = call.request.queryParameters["stop"]
             val alerts = when {
                 routeFilter != null ->
-                    services.alerts.alertsForRoute(staticData.resolveRoutes(routeFilter).map { it.id }.toSet())
+                    services.alerts.alertsForRoute(staticData.current.resolveRoutes(routeFilter).map { it.id }.toSet())
                 stopFilter != null -> services.alerts.alertsForStop(stopFilter)
                 else -> services.alerts.alerts()
             }
@@ -223,8 +223,8 @@ fun Routing.configureRoutes(services: AppServices) {
 }
 
 private suspend fun ApplicationCall.respondShape(shapeId: String, services: AppServices) {
-    val encoded = services.staticData.encodedShape(shapeId).orEmpty()
-    val points = services.staticData.shapePoints(shapeId)
+    val encoded = services.staticData.current.encodedShape(shapeId).orEmpty()
+    val points = services.staticData.current.shapePoints(shapeId)
     val includePoints = request.queryParameters["format"] == "points"
     respond(
         ShapeResponse(
@@ -251,7 +251,7 @@ private fun AppServices.buildStatus(): StatusResponse {
         upstreamRequests = client.totalRequests,
         refreshSuccesses = poller.successCount,
         refreshFailures = poller.failureCount,
-        staticData = staticData.stats(),
+        staticData = staticData.current.stats(),
         feeds = config.feeds.map { kind ->
             val latest = store.latest(kind)
             FeedStatusResponse(

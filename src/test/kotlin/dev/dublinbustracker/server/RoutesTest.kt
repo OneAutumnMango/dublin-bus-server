@@ -3,6 +3,7 @@ package dev.dublinbustracker.server
 import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.RealtimeGtfsClient
+import dev.dublinbustracker.data.StaticDataRef
 import dev.dublinbustracker.support.Fixtures
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -20,7 +21,7 @@ class RoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     private fun services(): AppServices {
-        val staticData = GtfsStaticData.parse(Fixtures.staticBundleJson())
+        val staticData = StaticDataRef(GtfsStaticData.parse(Fixtures.staticBundleJson()))
         val config = ServerConfig(
             port = 0,
             ntaApiKeys = listOf("nta-key"),
@@ -31,6 +32,8 @@ class RoutesTest {
             gtfsStaticPath = null,
             gtfsBaseUrl = "http://127.0.0.1:1/unused",
             allowUnsafePollRate = true,
+            // Long enough that the background static-data refresher never fires during a test.
+            gtfsRefreshIntervalHours = 24 * 365,
         )
         val client = RealtimeGtfsClient(listOf("nta-key"), baseUrl = config.gtfsBaseUrl)
         return AppServices.build(config, staticData, client).also { seed(it) }

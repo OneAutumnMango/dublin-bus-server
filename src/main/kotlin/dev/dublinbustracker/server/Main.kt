@@ -2,6 +2,7 @@ package dev.dublinbustracker.server
 
 import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.RealtimeGtfsClient
+import dev.dublinbustracker.data.StaticDataRef
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
@@ -34,8 +35,8 @@ fun main() {
             }
         }
 
-        val staticData = loadStaticData(config.gtfsStaticPath)
-        logger.info("Loaded static GTFS: {}", staticData.stats())
+        val staticData = StaticDataRef(loadStaticData(config.gtfsStaticPath))
+        logger.info("Loaded static GTFS: {}", staticData.current.stats())
 
         val httpClient = OkHttpClient.Builder()
             .callTimeout(60, TimeUnit.SECONDS)
@@ -81,5 +82,6 @@ fun Application.configureServer(services: AppServices) {
     install(ContentNegotiation) { json(Json { encodeDefaults = true; explicitNulls = false }) }
     install(CallLogging)
     services.poller.start(this)
+    services.staticDataRefresher.start(this)
     routing { configureRoutes(services) }
 }

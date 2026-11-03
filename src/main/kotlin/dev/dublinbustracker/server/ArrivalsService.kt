@@ -4,7 +4,7 @@ import com.google.transit.realtime.GtfsRealtime.FeedMessage
 import com.google.transit.realtime.GtfsRealtime.TripUpdate
 import dev.dublinbustracker.core.Arrival
 import dev.dublinbustracker.data.FeedKind
-import dev.dublinbustracker.data.GtfsStaticData
+import dev.dublinbustracker.data.StaticDataRef
 
 /** One live stop call on a trip, used to render a trip's progress along its route. */
 data class TripStopCall(
@@ -21,7 +21,7 @@ data class TripStopCall(
  */
 class ArrivalsService(
     private val store: FeedStore,
-    private val staticData: GtfsStaticData,
+    private val staticData: StaticDataRef,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     private fun feeds(): List<FeedMessage> =
@@ -29,7 +29,7 @@ class ArrivalsService(
 
     fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50): List<Arrival> {
         val now = nowEpochSeconds()
-        val wantedRouteIds = routeFilter?.let { filter -> staticData.resolveRoutes(filter).map { it.id }.toSet() }
+        val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
 
         return feeds()
             .asSequence()
@@ -49,7 +49,7 @@ class ArrivalsService(
         now: Long,
         wantedRouteIds: Set<String>?,
     ): Sequence<Arrival> {
-        val trip = staticData.trip(update.trip.tripId)
+        val trip = staticData.current.trip(update.trip.tripId)
         val routeId = trip?.routeId ?: update.trip.routeId
         if (wantedRouteIds != null && routeId !in wantedRouteIds) return emptySequence()
 
@@ -58,7 +58,7 @@ class ArrivalsService(
             .mapNotNull { stopTimeUpdate ->
                 val event = stopTimeUpdate.event() ?: return@mapNotNull null
                 Arrival(
-                    routeShortName = staticData.routeShortName(routeId),
+                    routeShortName = staticData.current.routeShortName(routeId),
                     destination = trip?.headsign.orEmpty(),
                     dueMinutes = ((event.time - now) / 60).toInt().coerceAtLeast(0),
                     isRealtime = true,
@@ -87,7 +87,7 @@ class ArrivalsService(
             TripStopCall(
                 stopSequence = stopTimeUpdate.stopSequence,
                 stopId = stopTimeUpdate.stopId,
-                stopName = staticData.stopById(stopTimeUpdate.stopId)?.name.orEmpty(),
+                stopName = staticData.current.stopById(stopTimeUpdate.stopId)?.name.orEmpty(),
                 expectedEpochSeconds = event.time,
                 delaySeconds = if (event.hasDelay()) event.delay else null,
             )
@@ -96,14 +96,14 @@ class ArrivalsService(
 
     /** Trip ids currently reporting updates, optionally limited to one route. */
     fun activeTripIds(routeFilter: String? = null): List<String> {
-        val wantedRouteIds = routeFilter?.let { filter -> staticData.resolveRoutes(filter).map { it.id }.toSet() }
+        val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
         return feeds()
             .asSequence()
             .flatMap { it.entityList.asSequence() }
             .filter { it.hasTripUpdate() }
             .map { it.tripUpdate.trip.tripId }
             .filter { tripId ->
-                wantedRouteIds == null || staticData.trip(tripId)?.routeId in wantedRouteIds
+                wantedRouteIds == null || staticData.current.trip(tripId)?.routeId in wantedRouteIds
             }
             .distinct()
             .toList()

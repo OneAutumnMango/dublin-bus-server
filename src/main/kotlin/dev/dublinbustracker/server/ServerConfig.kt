@@ -15,6 +15,7 @@ data class ServerConfig(
     val gtfsStaticPath: String?,
     val gtfsBaseUrl: String,
     val allowUnsafePollRate: Boolean,
+    val gtfsRefreshIntervalHours: Long,
 ) {
     /**
      * One cycle spends `feeds.size` calls, and the pool provides `ntaApiKeys.size` calls per
@@ -38,6 +39,7 @@ data class ServerConfig(
 
     companion object {
         const val DEFAULT_HISTORY_DEPTH = 30
+        const val DEFAULT_GTFS_REFRESH_INTERVAL_HOURS = 24L
 
         fun fromEnv(rawEnv: (String) -> String? = System::getenv): ServerConfig {
             // Compose and shell wrappers routinely pass "" for unset values; treat those as absent.
@@ -70,6 +72,10 @@ data class ServerConfig(
                 gtfsStaticPath = env("GTFS_STATIC_PATH"),
                 gtfsBaseUrl = env("GTFSR_BASE_URL") ?: DEFAULT_GTFSR_BASE_URL,
                 allowUnsafePollRate = env("ALLOW_UNSAFE_POLL_RATE").toBoolean(),
+                gtfsRefreshIntervalHours = env("GTFS_REFRESH_INTERVAL_HOURS")?.let {
+                    it.toLongOrNull()?.takeIf { hours -> hours >= 1 }
+                        ?: error("GTFS_REFRESH_INTERVAL_HOURS must be a positive integer, got '$it'")
+                } ?: DEFAULT_GTFS_REFRESH_INTERVAL_HOURS,
             )
         }
 

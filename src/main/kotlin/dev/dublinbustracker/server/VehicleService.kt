@@ -5,7 +5,7 @@ import dev.dublinbustracker.core.LatLon
 import dev.dublinbustracker.core.VehicleFix
 import dev.dublinbustracker.core.VehiclePosition
 import dev.dublinbustracker.data.FeedKind
-import dev.dublinbustracker.data.GtfsStaticData
+import dev.dublinbustracker.data.StaticDataRef
 
 data class BoundingBox(val minLat: Double, val minLon: Double, val maxLat: Double, val maxLon: Double) {
     fun contains(point: LatLon): Boolean =
@@ -26,13 +26,13 @@ data class BoundingBox(val minLat: Double, val minLon: Double, val maxLat: Doubl
 /** Reads live bus positions, and reconstructs recent tracks from the retained backlog. */
 class VehicleService(
     private val store: FeedStore,
-    private val staticData: GtfsStaticData,
+    private val staticData: StaticDataRef,
 ) {
     fun allVehicles(): List<VehiclePosition> =
         latestEntities().mapNotNull { it.toVehiclePosition() }
 
     fun vehiclesForRoute(routeIdOrShortName: String): List<VehiclePosition> {
-        val wanted = staticData.resolveRoutes(routeIdOrShortName).map { it.id }.toSet()
+        val wanted = staticData.current.resolveRoutes(routeIdOrShortName).map { it.id }.toSet()
         if (wanted.isEmpty()) return emptyList()
         return allVehicles().filter { it.routeId in wanted }
     }
@@ -77,14 +77,14 @@ class VehicleService(
     private fun FeedEntity.toVehiclePosition(): VehiclePosition? {
         val vehicle = vehicle
         if (!vehicle.hasPosition()) return null
-        val trip = staticData.trip(vehicle.trip.tripId)
+        val trip = staticData.current.trip(vehicle.trip.tripId)
         val routeId = trip?.routeId ?: vehicle.trip.routeId
         return VehiclePosition(
             vehicleId = vehicle.vehicle.id,
             label = vehicle.vehicle.label,
             tripId = vehicle.trip.tripId,
             routeId = routeId,
-            routeShortName = staticData.routeShortName(routeId),
+            routeShortName = staticData.current.routeShortName(routeId),
             headsign = trip?.headsign.orEmpty(),
             directionId = trip?.directionId ?: vehicle.trip.directionId.toString(),
             position = LatLon(vehicle.position.latitude.toDouble(), vehicle.position.longitude.toDouble()),
