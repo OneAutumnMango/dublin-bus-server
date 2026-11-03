@@ -62,7 +62,8 @@ curl -fsSL --progress-bar -o "$TMP_DIR/gtfs.zip" "$GTFS_URL"
 
 info "Extracting"
 unzip -q -o "$TMP_DIR/gtfs.zip" -d "$TMP_DIR/gtfs" \
-  agency.txt routes.txt trips.txt stop_times.txt stops.txt shapes.txt
+  agency.txt routes.txt trips.txt stop_times.txt stops.txt shapes.txt \
+  calendar.txt calendar_dates.txt
 
 info "Filtering to $AGENCY_NAME_PATTERN (this reads ~700MB, give it a minute)"
 mkdir -p "$(dirname "$OUT_FILE")"
