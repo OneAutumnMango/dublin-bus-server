@@ -40,26 +40,88 @@ class ArrivalsService(
     fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50): List<Arrival> {
         val now = nowEpochSeconds()
         val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
+        val tripUpdates = feeds().asSequence().flatMap { it.entityList.asSequence() }
+            .filter { it.hasTripUpdate() }.map { it.tripUpdate }.toList()
 
-        val realtime = feeds()
-            .asSequence()
-            .flatMap { it.entityList.asSequence() }
-            .filter { it.hasTripUpdate() }
-            .map { it.tripUpdate }
+        val direct = tripUpdates.asSequence()
             .flatMap { update -> arrivalsFrom(update, stopId, now, wantedRouteIds) }
             .distinctBy { it.tripId to it.expectedEpochSeconds }
             .toList()
+        val directTripIds = direct.mapTo(HashSet()) { it.tripId }
 
-        // A trip with no live TripUpdate yet (e.g. it hasn't left its terminus) still has a
-        // scheduled time in the static timetable - show that as a fallback, clearly marked as
-        // not real-time, rather than nothing at all.
-        val realtimeTripIds = realtime.mapTo(HashSet()) { it.tripId }
-        val scheduled = scheduledArrivalsForStop(stopId, now, wantedRouteIds, realtimeTripIds)
+        // The feed only ever reports a trip's immediate next stop, not its whole remaining
+        // route - but a trip that's live *somewhere* still tells us its current delay, which we
+        // can apply to this stop's scheduled time. More useful than silence, and more accurate
+        // than the bare, un-adjusted timetable, since it reflects the vehicle actually running.
+        val cascaded = tripUpdates.asSequence()
+            .filter { it.trip.tripId !in directTripIds }
+            .mapNotNull { update -> cascadedArrivalFor(update, stopId, now, wantedRouteIds) }
+            .toList()
 
-        return (realtime.asSequence() + scheduled)
+        // Only a trip with no live presence anywhere in the feed (e.g. it hasn't left its
+        // terminus yet) falls all the way back to the untouched static timetable.
+        val liveTripIds = directTripIds + cascaded.map { it.tripId }
+        val scheduled = scheduledArrivalsForStop(stopId, now, wantedRouteIds, liveTripIds)
+
+        return (direct.asSequence() + cascaded.asSequence() + scheduled)
             .sortedBy { it.expectedEpochSeconds }
             .take(limit)
             .toList()
+    }
+
+    private fun cascadedArrivalFor(
+        update: TripUpdate,
+        stopId: String,
+        now: Long,
+        wantedRouteIds: Set<String>?,
+    ): Arrival? {
+        val tripId = update.trip.tripId
+        val trip = staticData.current.trip(tripId) ?: return null
+        if (wantedRouteIds != null && trip.routeId !in wantedRouteIds) return null
+
+        val (reportedStopId, reportedEvent) = update.stopTimeUpdateList.asSequence()
+            .mapNotNull { stu -> stu.event()?.let { stu.stopId to it } }
+            .firstOrNull() ?: return null
+
+        val delaySeconds = if (reportedEvent.hasDelay()) {
+            reportedEvent.delay
+        } else {
+            val reportedScheduled = closestScheduledEpoch(tripId, reportedStopId, trip.serviceId, reportedEvent.time)
+                ?: return null
+            (reportedEvent.time - reportedScheduled).toInt()
+        }
+
+        val queriedScheduled = closestScheduledEpoch(tripId, stopId, trip.serviceId, now) ?: return null
+        val epoch = queriedScheduled + delaySeconds
+        val horizon = now + SCHEDULED_LOOKAHEAD_SECONDS
+        if (epoch !in (now - SCHEDULED_PAST_GRACE_SECONDS)..horizon) return null
+
+        return Arrival(
+            routeShortName = staticData.current.routeShortName(trip.routeId),
+            destination = trip.headsign,
+            dueMinutes = ((epoch - now) / 60).toInt().coerceAtLeast(0),
+            isRealtime = true,
+            tripId = tripId,
+            routeId = trip.routeId,
+            stopId = stopId,
+            expectedEpochSeconds = epoch,
+            delaySeconds = delaySeconds,
+            vehicleId = update.vehicle.id.orNullIfBlank(),
+        )
+    }
+
+    /**
+     * [tripId]'s static scheduled epoch at [stopId], picking whichever service day (today,
+     * yesterday or tomorrow) lands closest to [near] - used to line a reported live event up
+     * with its schedule slot even near a midnight service-day boundary.
+     */
+    private fun closestScheduledEpoch(tripId: String, stopId: String, serviceId: String, near: Long): Long? {
+        val call = staticData.current.scheduledCallsForStop(stopId).firstOrNull { it.tripId == tripId } ?: return null
+        val today = Instant.ofEpochSecond(near).atZone(SCHEDULE_ZONE).toLocalDate()
+        return sequenceOf(today, today.minusDays(1), today.plusDays(1))
+            .filter { date -> staticData.current.isServiceActive(serviceId, date) }
+            .map { date -> date.atStartOfDay(SCHEDULE_ZONE).toEpochSecond() + call.arrivalSecondsSinceMidnight }
+            .minByOrNull { kotlin.math.abs(it - near) }
     }
 
     private fun scheduledArrivalsForStop(

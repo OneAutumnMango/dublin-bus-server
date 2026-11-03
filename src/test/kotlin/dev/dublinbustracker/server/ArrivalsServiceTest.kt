@@ -273,4 +273,93 @@ class ArrivalsServiceTest {
         assertEquals(1, svc.arrivalsForStop("s1", routeFilter = "15").size)
         assertEquals(emptyList(), svc.arrivalsForStop("s1", routeFilter = "999"))
     }
+
+    // --- cascading a live trip's delay to a stop it hasn't reported yet --------
+
+    // t1 is scheduled at s1 at "now", and 10 minutes later at s2 - used to verify a delay
+    // reported live at s1 carries forward to a cascaded estimate at s2.
+    private fun twoStopBundle(): String =
+        """{"version":3,
+           |"routes":[{"id":"r1","shortName":"15","longName":"","agencyId":"a1"}],
+           |"trips":{"t1":{"routeId":"r1","headsign":"Merrion Square","directionId":"0","shapeId":"","serviceId":"svc"}},
+           |"services":{"svc":{"weekdays":"1111111","start":"20240101","end":"20241231"}},
+           |"stopSchedule":{
+           |  "s1":[{"t":"t1","s":$secondsSinceDublinMidnight}],
+           |  "s2":[{"t":"t1","s":${secondsSinceDublinMidnight + 600}}]
+           |}}
+        """.trimMargin()
+
+    private fun twoStopService(): Pair<FeedStore, ArrivalsService> {
+        val store = FeedStore(historyDepth = 5)
+        val staticData = StaticDataRef(GtfsStaticData.parse(twoStopBundle()))
+        return store to ArrivalsService(store, staticData, nowEpochSeconds = { wednesdayMorning })
+    }
+
+    @Test
+    fun `a trip reported live at one stop cascades its delay to another stop's schedule`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", wednesdayMorning + 180, delaySeconds = 180),
+                    ),
+                ),
+            ),
+        )
+
+        val arrival = svc.arrivalsForStop("s2").single()
+
+        assertTrue(arrival.isRealtime)
+        assertEquals(180, arrival.delaySeconds)
+        // s2 is scheduled 10 min after s1, plus the 3 min delay reported at s1.
+        assertEquals(13, arrival.dueMinutes)
+    }
+
+    @Test
+    fun `cascading derives the delay from schedule when the feed reports none explicitly`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    // No delaySeconds given: 120s later than s1's own scheduled time.
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + 120)),
+                ),
+            ),
+        )
+
+        val arrival = svc.arrivalsForStop("s2").single()
+
+        assertEquals(120, arrival.delaySeconds)
+        assertEquals(12, arrival.dueMinutes)
+    }
+
+    @Test
+    fun `a direct report for the queried stop takes priority over a cascade`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", wednesdayMorning + 100),
+                        Fixtures.stopTimeUpdate("s2", wednesdayMorning + 500),
+                    ),
+                ),
+            ),
+        )
+
+        val arrivals = svc.arrivalsForStop("s2")
+
+        assertEquals(1, arrivals.size)
+        assertEquals(wednesdayMorning + 500, arrivals.single().expectedEpochSeconds)
+    }
 }
