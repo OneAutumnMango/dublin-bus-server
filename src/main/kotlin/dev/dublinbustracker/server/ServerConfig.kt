@@ -8,7 +8,6 @@ const val RATE_LIMIT_WINDOW_MS = 60_000L
 
 data class ServerConfig(
     val port: Int,
-    val serverApiKey: String,
     val ntaApiKeys: List<String>,
     val feeds: List<FeedKind>,
     val pollIntervalMs: Long,
@@ -44,9 +43,6 @@ data class ServerConfig(
             // Compose and shell wrappers routinely pass "" for unset values; treat those as absent.
             val env: (String) -> String? = { name -> rawEnv(name)?.takeIf { it.isNotBlank() } }
 
-            val serverApiKey = env("SERVER_API_KEY")
-                ?: error("SERVER_API_KEY is required - clients must send it as the X-Api-Key header")
-
             val ntaApiKeys = listOfNotNull(env("GTFSR_API_KEY"), env("GTFSR_API_KEY_SECONDARY"))
             require(ntaApiKeys.isNotEmpty()) { "GTFSR_API_KEY is required (GTFSR_API_KEY_SECONDARY is optional)" }
 
@@ -67,7 +63,6 @@ data class ServerConfig(
                     it.toIntOrNull()?.takeIf { port -> port in 1..65535 }
                         ?: error("PORT must be 1-65535, got '$it'")
                 } ?: 8080,
-                serverApiKey = serverApiKey,
                 ntaApiKeys = ntaApiKeys,
                 feeds = feeds,
                 pollIntervalMs = pollIntervalMs,

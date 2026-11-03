@@ -12,7 +12,7 @@ Covers Dublin Bus, Bus Éireann and Go-Ahead Ireland.
 ## Quick start (Docker)
 
 ```bash
-cp server.env.example server.env    # fill in SERVER_API_KEY and GTFSR_API_KEY
+cp server.env.example server.env    # fill in GTFSR_API_KEY
 docker compose up -d
 ```
 
@@ -21,17 +21,21 @@ the `/data` volume. That takes a few minutes and only happens once; afterwards s
 seconds. Then:
 
 ```bash
-curl -H "X-Api-Key: $SERVER_API_KEY" localhost:8080/v1/status
+curl localhost:8080/v1/status
 ```
+
+There is no server-side auth; this is meant to sit behind something that already gates access
+(e.g. a Cloudflare Access / Tunnel in front of it), not to be exposed directly.
 
 Set `REFRESH_GTFS_ON_START=true` to rebuild the bundle (timetables change periodically).
 
 ### Running without Docker
 
 ```bash
-./scripts/fetch-gtfs-data.sh   # writes src/main/resources/gtfs_static.json
-./scripts/run-server.sh        # or --build for a standalone installDist
-./scripts/test.sh
+./scripts/fetch-gtfs-data.sh    # writes src/main/resources/gtfs_static.json
+./scripts/run-server.sh         # or --build for a standalone installDist
+./scripts/test.sh               # unit tests, no network needed
+./scripts/live-smoke-test.sh    # runs the real server against the live NTA API and checks the data
 ```
 
 ### Behind a TLS-inspecting proxy
@@ -45,7 +49,6 @@ All configuration is environment variables (see `server.env.example`).
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SERVER_API_KEY` | *required* | Shared secret clients send as `X-Api-Key` |
 | `GTFSR_API_KEY` | *required* | NTA key ([sign up](https://developer.nationaltransport.ie/signup)) |
 | `GTFSR_API_KEY_SECONDARY` | – | Optional second key, doubling the upstream budget |
 | `PORT` | `8080` | Listen port |
@@ -55,6 +58,8 @@ All configuration is environment variables (see `server.env.example`).
 | `ALLOW_UNSAFE_POLL_RATE` | `false` | Permit exceeding the fair-usage limit |
 | `GTFS_STATIC_PATH` | bundled resource | Where the static bundle lives |
 | `GTFSR_BASE_URL` | NTA v2 endpoint | Override for testing |
+| `NTFY_URL` | – | Push URL for a self-hosted [ntfy](https://ntfy.sh) topic. Blank disables alerting |
+| `NTFY_LEVEL` | `info` | How much to push: `off`, `error`, `warn`, `info` (see below) |
 
 ### What it fetches
 
@@ -89,6 +94,24 @@ Setting `POLL_INTERVAL_MS` below the safe minimum aborts startup, because the pr
 is HTTP 429s. Override with `ALLOW_UNSAFE_POLL_RATE=true` only if your keys have a raised
 limit. `/v1/status` reports the configured rate, the safe minimum, and the running call count.
 
+A poll that fails at the network level (timeout, connection reset) is retried up to twice more
+with backoff, since those are usually transient. A poll that fails with an HTTP error status
+(e.g. a 429) is not retried — retrying it immediately would just repeat it and burn more of the
+per-key budget.
+
+### Alerting
+
+Set `NTFY_URL` to a self-hosted [ntfy](https://ntfy.sh) topic URL to get a push notification
+when things go wrong. `NTFY_LEVEL` controls how much, like a log level — each level includes
+everything more severe than it:
+
+| Level | Sends |
+| --- | --- |
+| `off` | Nothing |
+| `error` | The server failed to start |
+| `warn` | + a feed has failed 3 cycles in a row (likely stale) or just recovered |
+| `info` (default) | + every single poll failure, including transient ones already retried away |
+
 ### Backlog
 
 `HISTORY_DEPTH` is how many past snapshots of each feed are kept in memory. This is what makes
@@ -99,13 +122,13 @@ retained snapshots into a track. Reachable history is roughly
 
 ## API
 
-Everything except `/health` requires the `X-Api-Key` header. Routes accept either a GTFS route
-id or a bus number (`15`, `40D`), and stops accept either a GTFS stop id or the number printed
-at the roadside. `limit` defaults to 50 and caps at 500.
+There is no auth on this server — see the note under Quick start. Routes accept either a GTFS
+route id or a bus number (`15`, `40D`), and stops accept either a GTFS stop id or the number
+printed at the roadside. `limit` defaults to 50 and caps at 500.
 
 | Endpoint | Returns |
 | --- | --- |
-| `GET /health` | Liveness, no auth |
+| `GET /health` | Liveness |
 | `GET /v1/status` | Poll rate, backlog depth, feed freshness, bundle stats |
 | `GET /v1/stops?query=&limit=` | Stop search by name or number |
 | `GET /v1/stops/nearby?lat=&lon=&radius=&limit=` | Stops near a point (radius in metres, default 500) |
@@ -133,12 +156,11 @@ Android app that already ships against them.
 ### Example
 
 ```bash
-H="X-Api-Key: $SERVER_API_KEY"
-curl -H "$H" "localhost:8080/v1/stops?query=Trinity"     # find a stop
-curl -H "$H" "localhost:8080/v1/stops/1001/arrivals"     # what's due there
-curl -H "$H" "localhost:8080/v1/routes/15/stops"         # where route 15 goes
-curl -H "$H" "localhost:8080/v1/routes/15/vehicles"      # where its buses are now
-curl -H "$H" "localhost:8080/v1/vehicles/226/history"    # where one has been
+curl "localhost:8080/v1/stops?query=Trinity"     # find a stop
+curl "localhost:8080/v1/stops/1001/arrivals"     # what's due there
+curl "localhost:8080/v1/routes/15/stops"         # where route 15 goes
+curl "localhost:8080/v1/routes/15/vehicles"      # where its buses are now
+curl "localhost:8080/v1/vehicles/226/history"    # where one has been
 ```
 
 ## Static GTFS bundle

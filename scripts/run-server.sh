@@ -18,7 +18,6 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-: "${SERVER_API_KEY:?set SERVER_API_KEY in server.env or the environment}"
 : "${GTFSR_API_KEY:?set GTFSR_API_KEY in server.env or the environment}"
 
 cd "$REPO_ROOT"

@@ -21,38 +21,45 @@ private const val STATIC_RESOURCE_NAME = "gtfs_static.json"
 
 fun main() {
     val logger = LoggerFactory.getLogger("dev.dublinbustracker.server.Main")
-    val config = ServerConfig.fromEnv()
+    val notifier = NtfyNotifier.fromEnv()
 
-    config.validate().forEach { warning ->
-        if (config.allowUnsafePollRate) {
-            logger.warn(warning)
-        } else {
-            error("$warning. Set ALLOW_UNSAFE_POLL_RATE=true to override.")
+    try {
+        val config = ServerConfig.fromEnv()
+
+        config.validate().forEach { warning ->
+            if (config.allowUnsafePollRate) {
+                logger.warn(warning)
+            } else {
+                error("$warning. Set ALLOW_UNSAFE_POLL_RATE=true to override.")
+            }
         }
+
+        val staticData = loadStaticData(config.gtfsStaticPath)
+        logger.info("Loaded static GTFS: {}", staticData.stats())
+
+        val httpClient = OkHttpClient.Builder()
+            .callTimeout(60, TimeUnit.SECONDS)
+            .build()
+        val client = RealtimeGtfsClient(config.ntaApiKeys, httpClient, config.gtfsBaseUrl)
+        val services = AppServices.build(config, staticData, client, notifier)
+
+        logger.info(
+            "Polling {} every {}ms ({} upstream calls/min across {} key(s)); retaining {} snapshots per feed",
+            config.feeds.joinToString(),
+            config.pollIntervalMs,
+            "%.2f".format(config.upstreamCallsPerMinute),
+            config.ntaApiKeys.size,
+            config.historyDepth,
+        )
+
+        // Warm the cache so the first client request is served real data.
+        runBlocking { services.poller.refreshAll() }
+
+        embeddedServer(Netty, port = config.port) { configureServer(services) }.start(wait = true)
+    } catch (e: Throwable) {
+        notifier.notify(NtfyLevel.ERROR, "Dublin Bus Server failed to start", e.message ?: e.toString())
+        throw e
     }
-
-    val staticData = loadStaticData(config.gtfsStaticPath)
-    logger.info("Loaded static GTFS: {}", staticData.stats())
-
-    val httpClient = OkHttpClient.Builder()
-        .callTimeout(60, TimeUnit.SECONDS)
-        .build()
-    val client = RealtimeGtfsClient(config.ntaApiKeys, httpClient, config.gtfsBaseUrl)
-    val services = AppServices.build(config, staticData, client)
-
-    logger.info(
-        "Polling {} every {}ms ({} upstream calls/min across {} key(s)); retaining {} snapshots per feed",
-        config.feeds.joinToString(),
-        config.pollIntervalMs,
-        "%.2f".format(config.upstreamCallsPerMinute),
-        config.ntaApiKeys.size,
-        config.historyDepth,
-    )
-
-    // Warm the cache so the first client request is served real data.
-    runBlocking { services.poller.refreshAll() }
-
-    embeddedServer(Netty, port = config.port) { configureServer(services) }.start(wait = true)
 }
 
 fun loadStaticData(path: String?): GtfsStaticData {

@@ -15,14 +15,19 @@ class AppServices(
     val alerts: AlertsService,
 ) {
     companion object {
-        fun build(config: ServerConfig, staticData: GtfsStaticData, client: RealtimeGtfsClient): AppServices {
+        fun build(
+            config: ServerConfig,
+            staticData: GtfsStaticData,
+            client: RealtimeGtfsClient,
+            notifier: NtfyNotifier = NtfyNotifier(null, NtfyLevel.OFF),
+        ): AppServices {
             val store = FeedStore(config.historyDepth)
             return AppServices(
                 config = config,
                 staticData = staticData,
                 store = store,
                 client = client,
-                poller = FeedPoller(client, store, config.feeds, config.pollIntervalMs),
+                poller = FeedPoller(client, store, config.feeds, config.pollIntervalMs, notifier),
                 arrivals = ArrivalsService(store, staticData),
                 vehicles = VehicleService(store, staticData),
                 alerts = AlertsService(store),

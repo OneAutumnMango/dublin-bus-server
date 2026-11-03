@@ -5,8 +5,6 @@ import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.RealtimeGtfsClient
 import dev.dublinbustracker.support.Fixtures
 import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
@@ -20,13 +18,11 @@ import kotlin.test.assertTrue
 
 class RoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
-    private val apiKey = "secret"
 
     private fun services(): AppServices {
         val staticData = GtfsStaticData.parse(Fixtures.staticBundleJson())
         val config = ServerConfig(
             port = 0,
-            serverApiKey = apiKey,
             ntaApiKeys = listOf("nta-key"),
             feeds = listOf(FeedKind.TRIP_UPDATES, FeedKind.VEHICLES),
             // Long enough that the background poller never fires during a test.
@@ -80,48 +76,10 @@ class RoutesTest {
         application { configureServer(services()) }
     }
 
-    private suspend fun ApplicationTestBuilder.authedGet(path: String): HttpResponse =
-        client.get(path) { header("X-Api-Key", apiKey) }
-
-    // --- auth ---------------------------------------------------------------
-
     @Test
-    fun `health needs no api key`() = testApplication {
+    fun `health responds ok`() = testApplication {
         startServer()
         assertEquals(HttpStatusCode.OK, client.get("/health").status)
-    }
-
-    @Test
-    fun `every data endpoint rejects a missing or wrong api key`() = testApplication {
-        startServer()
-        val paths = listOf(
-            "/arrivals?stopId=s1",
-            "/stops?query=trinity",
-            "/v1/status",
-            "/v1/stops?query=trinity",
-            "/v1/stops/nearby?lat=53.34&lon=-6.25",
-            "/v1/stops/s1",
-            "/v1/stops/s1/arrivals",
-            "/v1/routes",
-            "/v1/routes/15",
-            "/v1/routes/15/stops",
-            "/v1/routes/15/shape",
-            "/v1/routes/15/vehicles",
-            "/v1/vehicles",
-            "/v1/vehicles/bus-1",
-            "/v1/vehicles/bus-1/history",
-            "/v1/trips/t1",
-            "/v1/trips/t1/shape",
-            "/v1/alerts",
-        )
-        paths.forEach { path ->
-            assertEquals(HttpStatusCode.Unauthorized, client.get(path).status, "no key: $path")
-            assertEquals(
-                HttpStatusCode.Unauthorized,
-                client.get(path) { header("X-Api-Key", "wrong") }.status,
-                "wrong key: $path",
-            )
-        }
     }
 
     // --- legacy endpoints the Android app already ships against ---------------
@@ -129,7 +87,7 @@ class RoutesTest {
     @Test
     fun `legacy arrivals endpoint still returns arrivals for a stop`() = testApplication {
         startServer()
-        val response = authedGet("/arrivals?stopId=s1")
+        val response = client.get("/arrivals?stopId=s1")
         assertEquals(HttpStatusCode.OK, response.status)
         val arrivals = json.decodeFromString<List<ArrivalResponse>>(response.bodyAsText())
         assertEquals("15", arrivals.single().routeShortName)
@@ -138,13 +96,13 @@ class RoutesTest {
     @Test
     fun `legacy arrivals endpoint requires a stopId`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.BadRequest, authedGet("/arrivals").status)
+        assertEquals(HttpStatusCode.BadRequest, client.get("/arrivals").status)
     }
 
     @Test
     fun `legacy stops search still works`() = testApplication {
         startServer()
-        val stops = json.decodeFromString<List<StopResponse>>(authedGet("/stops?query=trinity").bodyAsText())
+        val stops = json.decodeFromString<List<StopResponse>>(client.get("/stops?query=trinity").bodyAsText())
         assertEquals("s1", stops.single().id)
     }
 
@@ -153,7 +111,7 @@ class RoutesTest {
     @Test
     fun `status reports rate, backlog and feed freshness`() = testApplication {
         startServer()
-        val status = json.decodeFromString<StatusResponse>(authedGet("/v1/status").bodyAsText())
+        val status = json.decodeFromString<StatusResponse>(client.get("/v1/status").bodyAsText())
 
         assertEquals(3_600_000, status.pollIntervalMs)
         assertEquals(5, status.historyDepth)
@@ -169,21 +127,21 @@ class RoutesTest {
     @Test
     fun `stop search returns the routes serving each stop`() = testApplication {
         startServer()
-        val stops = json.decodeFromString<List<StopResponse>>(authedGet("/v1/stops?query=trinity").bodyAsText())
+        val stops = json.decodeFromString<List<StopResponse>>(client.get("/v1/stops?query=trinity").bodyAsText())
         assertEquals(listOf("15", "27"), stops.single().routes)
     }
 
     @Test
     fun `stop search honours the limit`() = testApplication {
         startServer()
-        val stops = json.decodeFromString<List<StopResponse>>(authedGet("/v1/stops?query=a&limit=1").bodyAsText())
+        val stops = json.decodeFromString<List<StopResponse>>(client.get("/v1/stops?query=a&limit=1").bodyAsText())
         assertTrue(stops.size <= 1)
     }
 
     @Test
     fun `nearby stops are returned within the radius`() = testApplication {
         startServer()
-        val response = authedGet("/v1/stops/nearby?lat=53.3441&lon=-6.2578&radius=3000")
+        val response = client.get("/v1/stops/nearby?lat=53.3441&lon=-6.2578&radius=3000")
         val stops = json.decodeFromString<List<StopResponse>>(response.bodyAsText())
         assertEquals(listOf("s1", "s2"), stops.map { it.id })
     }
@@ -191,37 +149,37 @@ class RoutesTest {
     @Test
     fun `nearby stops requires coordinates`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.BadRequest, authedGet("/v1/stops/nearby?lat=53.3441").status)
+        assertEquals(HttpStatusCode.BadRequest, client.get("/v1/stops/nearby?lat=53.3441").status)
     }
 
     @Test
     fun `a stop can be fetched by roadside code`() = testApplication {
         startServer()
-        val stop = json.decodeFromString<StopResponse>(authedGet("/v1/stops/1001").bodyAsText())
+        val stop = json.decodeFromString<StopResponse>(client.get("/v1/stops/1001").bodyAsText())
         assertEquals("s1", stop.id)
     }
 
     @Test
     fun `an unknown stop is a 404`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/stops/nope").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/stops/nope").status)
     }
 
     @Test
     fun `stop arrivals can be filtered by bus number`() = testApplication {
         startServer()
-        val all = json.decodeFromString<List<ArrivalResponse>>(authedGet("/v1/stops/s1/arrivals").bodyAsText())
+        val all = json.decodeFromString<List<ArrivalResponse>>(client.get("/v1/stops/s1/arrivals").bodyAsText())
         assertEquals(1, all.size)
         assertEquals("bus-1", all.single().vehicleId)
 
-        val filtered = authedGet("/v1/stops/s1/arrivals?route=27").bodyAsText()
+        val filtered = client.get("/v1/stops/s1/arrivals?route=27").bodyAsText()
         assertEquals(emptyList(), json.decodeFromString<List<ArrivalResponse>>(filtered))
     }
 
     @Test
     fun `arrivals for an unknown stop are a 404`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/stops/nope/arrivals").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/stops/nope/arrivals").status)
     }
 
     // --- routes ---------------------------------------------------------------
@@ -229,33 +187,33 @@ class RoutesTest {
     @Test
     fun `routes can be listed and searched`() = testApplication {
         startServer()
-        val all = json.decodeFromString<List<RouteResponse>>(authedGet("/v1/routes").bodyAsText())
+        val all = json.decodeFromString<List<RouteResponse>>(client.get("/v1/routes").bodyAsText())
         assertEquals(3, all.size)
 
-        val filtered = json.decodeFromString<List<RouteResponse>>(authedGet("/v1/routes?query=27").bodyAsText())
+        val filtered = json.decodeFromString<List<RouteResponse>>(client.get("/v1/routes?query=27").bodyAsText())
         assertEquals(listOf("r3"), filtered.map { it.id })
     }
 
     @Test
     fun `a bus number returns every route variant`() = testApplication {
         startServer()
-        val routes = json.decodeFromString<List<RouteResponse>>(authedGet("/v1/routes/15").bodyAsText())
+        val routes = json.decodeFromString<List<RouteResponse>>(client.get("/v1/routes/15").bodyAsText())
         assertEquals(setOf("r1", "r2"), routes.map { it.id }.toSet())
     }
 
     @Test
     fun `an unknown route is a 404`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/routes/999").status)
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/routes/999/stops").status)
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/routes/999/shape").status)
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/routes/999/vehicles").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/routes/999").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/routes/999/stops").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/routes/999/shape").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/routes/999/vehicles").status)
     }
 
     @Test
     fun `route stops are returned per direction, in order`() = testApplication {
         startServer()
-        val response = json.decodeFromString<RouteStopsResponse>(authedGet("/v1/routes/15/stops").bodyAsText())
+        val response = json.decodeFromString<RouteStopsResponse>(client.get("/v1/routes/15/stops").bodyAsText())
         assertEquals("r1", response.routeId)
         assertEquals(listOf("s1", "s2"), response.directions.getValue("0").map { it.id })
         assertEquals(listOf("s2", "s1"), response.directions.getValue("1").map { it.id })
@@ -265,7 +223,7 @@ class RoutesTest {
     fun `route stops can be narrowed to one direction`() = testApplication {
         startServer()
         val response = json.decodeFromString<RouteStopsResponse>(
-            authedGet("/v1/routes/15/stops?direction=0").bodyAsText(),
+            client.get("/v1/routes/15/stops?direction=0").bodyAsText(),
         )
         assertEquals(setOf("0"), response.directions.keys)
     }
@@ -273,13 +231,13 @@ class RoutesTest {
     @Test
     fun `route shape returns an encoded polyline, and points on request`() = testApplication {
         startServer()
-        val encoded = json.decodeFromString<ShapeResponse>(authedGet("/v1/routes/15/shape").bodyAsText())
+        val encoded = json.decodeFromString<ShapeResponse>(client.get("/v1/routes/15/shape").bodyAsText())
         assertEquals(3, encoded.pointCount)
         assertTrue(encoded.encodedPolyline.isNotEmpty())
         assertNull(encoded.points)
 
         val expanded = json.decodeFromString<ShapeResponse>(
-            authedGet("/v1/routes/15/shape?format=points").bodyAsText(),
+            client.get("/v1/routes/15/shape?format=points").bodyAsText(),
         )
         assertEquals(3, expanded.points?.size)
         assertEquals(2, expanded.points?.first()?.size)
@@ -290,11 +248,11 @@ class RoutesTest {
     @Test
     fun `live vehicles are listed and can be filtered by route`() = testApplication {
         startServer()
-        val all = json.decodeFromString<List<VehicleResponse>>(authedGet("/v1/vehicles").bodyAsText())
+        val all = json.decodeFromString<List<VehicleResponse>>(client.get("/v1/vehicles").bodyAsText())
         assertEquals(listOf("bus-1"), all.map { it.vehicleId })
 
         val onRoute = json.decodeFromString<List<VehicleResponse>>(
-            authedGet("/v1/routes/15/vehicles").bodyAsText(),
+            client.get("/v1/routes/15/vehicles").bodyAsText(),
         )
         assertEquals(listOf("bus-1"), onRoute.map { it.vehicleId })
     }
@@ -303,12 +261,12 @@ class RoutesTest {
     fun `vehicles can be filtered by bounding box`() = testApplication {
         startServer()
         val inside = json.decodeFromString<List<VehicleResponse>>(
-            authedGet("/v1/vehicles?bbox=53.30,-6.30,53.40,-6.20").bodyAsText(),
+            client.get("/v1/vehicles?bbox=53.30,-6.30,53.40,-6.20").bodyAsText(),
         )
         assertEquals(1, inside.size)
 
         val outside = json.decodeFromString<List<VehicleResponse>>(
-            authedGet("/v1/vehicles?bbox=51.0,-9.0,52.0,-8.0").bodyAsText(),
+            client.get("/v1/vehicles?bbox=51.0,-9.0,52.0,-8.0").bodyAsText(),
         )
         assertEquals(emptyList(), outside)
     }
@@ -316,22 +274,22 @@ class RoutesTest {
     @Test
     fun `a malformed bounding box is a 400`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.BadRequest, authedGet("/v1/vehicles?bbox=1,2,3").status)
+        assertEquals(HttpStatusCode.BadRequest, client.get("/v1/vehicles?bbox=1,2,3").status)
     }
 
     @Test
     fun `a single vehicle can be fetched, and unknown ones are a 404`() = testApplication {
         startServer()
-        val vehicle = json.decodeFromString<VehicleResponse>(authedGet("/v1/vehicles/bus-1").bodyAsText())
+        val vehicle = json.decodeFromString<VehicleResponse>(client.get("/v1/vehicles/bus-1").bodyAsText())
         assertEquals("15", vehicle.routeShortName)
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/vehicles/ghost").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/vehicles/ghost").status)
     }
 
     @Test
     fun `vehicle history returns the retained track as fixes and a polyline`() = testApplication {
         startServer()
         val history = json.decodeFromString<VehicleHistoryResponse>(
-            authedGet("/v1/vehicles/bus-1/history").bodyAsText(),
+            client.get("/v1/vehicles/bus-1/history").bodyAsText(),
         )
         assertEquals(2, history.fixCount)
         assertEquals(listOf(1_000L, 1_001L), history.fixes.map { it.timestampEpochSeconds })
@@ -341,7 +299,7 @@ class RoutesTest {
     @Test
     fun `history for a vehicle with no retained fixes is a 404`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/vehicles/ghost/history").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/vehicles/ghost/history").status)
     }
 
     // --- trips and alerts -------------------------------------------------------
@@ -349,7 +307,7 @@ class RoutesTest {
     @Test
     fun `a trip returns its route, live vehicle and stop calls`() = testApplication {
         startServer()
-        val trip = json.decodeFromString<TripResponse>(authedGet("/v1/trips/t1").bodyAsText())
+        val trip = json.decodeFromString<TripResponse>(client.get("/v1/trips/t1").bodyAsText())
 
         assertEquals("15", trip.routeShortName)
         assertEquals("Merrion Square", trip.headsign)
@@ -361,24 +319,24 @@ class RoutesTest {
     @Test
     fun `an unknown trip is a 404`() = testApplication {
         startServer()
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/trips/nope").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/trips/nope").status)
     }
 
     @Test
     fun `a trip shape is returned, and a trip without one is a 404`() = testApplication {
         startServer()
-        val shape = json.decodeFromString<ShapeResponse>(authedGet("/v1/trips/t1/shape").bodyAsText())
+        val shape = json.decodeFromString<ShapeResponse>(client.get("/v1/trips/t1/shape").bodyAsText())
         assertEquals("sh1", shape.shapeId)
         // t3 exists in the bundle but has no shape id.
-        assertEquals(HttpStatusCode.NotFound, authedGet("/v1/trips/t3/shape").status)
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/trips/t3/shape").status)
     }
 
     @Test
     fun `alerts are listed and can be filtered by route or stop`() = testApplication {
         startServer()
-        assertEquals(1, json.decodeFromString<List<AlertResponse>>(authedGet("/v1/alerts").bodyAsText()).size)
-        assertEquals(1, json.decodeFromString<List<AlertResponse>>(authedGet("/v1/alerts?route=15").bodyAsText()).size)
-        assertEquals(1, json.decodeFromString<List<AlertResponse>>(authedGet("/v1/alerts?stop=s1").bodyAsText()).size)
-        assertEquals(0, json.decodeFromString<List<AlertResponse>>(authedGet("/v1/alerts?stop=s2").bodyAsText()).size)
+        assertEquals(1, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts").bodyAsText()).size)
+        assertEquals(1, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts?route=15").bodyAsText()).size)
+        assertEquals(1, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts?stop=s1").bodyAsText()).size)
+        assertEquals(0, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts?stop=s2").bodyAsText()).size)
     }
 }

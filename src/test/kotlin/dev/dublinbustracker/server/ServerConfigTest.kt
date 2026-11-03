@@ -8,7 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ServerConfigTest {
-    private val required = mapOf("SERVER_API_KEY" to "secret", "GTFSR_API_KEY" to "nta-1")
+    private val required = mapOf("GTFSR_API_KEY" to "nta-1")
 
     private fun config(vararg overrides: Pair<String, String?>): ServerConfig {
         val env = required + overrides.toMap()
@@ -95,17 +95,9 @@ class ServerConfigTest {
     }
 
     @Test
-    fun `missing server api key is fatal`() {
-        val error = assertFailsWith<IllegalStateException> {
-            ServerConfig.fromEnv { mapOf("GTFSR_API_KEY" to "nta-1")[it] }
-        }
-        assertTrue(error.message!!.contains("SERVER_API_KEY"))
-    }
-
-    @Test
     fun `missing nta key is fatal`() {
         assertFailsWith<IllegalArgumentException> {
-            ServerConfig.fromEnv { mapOf("SERVER_API_KEY" to "secret")[it] }
+            ServerConfig.fromEnv { mapOf<String, String>()[it] }
         }
     }
 
