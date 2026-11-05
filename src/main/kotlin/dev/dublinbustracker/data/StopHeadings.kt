@@ -9,17 +9,22 @@ import dev.dublinbustracker.core.haversineMeters
 /** Which way a route's buses are heading as they pass a stop, e.g. route "4" heading "NW". */
 data class RouteHeading(val route: String, val compass: String)
 
-/** Closer than this the neighbouring stops say nothing reliable about direction. */
+/** A terminus closer than this tells us nothing about direction, so the road itself is used instead. */
+private const val MIN_TERMINUS_METERS = 50.0
+
+/** Neighbouring stops closer than this tell us nothing either. */
 private const val MIN_SEGMENT_METERS = 15.0
 
 /**
- * The compass direction each route travels at [stop]. It is stop-based: a stop on the other side
- * of the road sits in the opposite direction's stop sequence, so it gets the opposite heading.
+ * The compass direction each route's buses are heading as they pass [stop]: from the stop towards
+ * the terminus that direction of the route runs to (the way a passenger would say "the 4 goes
+ * north-west"). It is stop-based: a stop on the other side of the road sits in the opposite
+ * direction's stop sequence, which ends at the other terminus, so it gets the opposite heading.
  *
- * The heading is read from the stops either side of this one in each route's sequence. A bus
- * departing is preferred to one only arriving (the end of a route is also the start of the way
- * back, and "where it goes from here" is what's useful). A route that visits the stop heading in
- * two different directions (a loop, say) lists both, as "NW/SE".
+ * A bus departing is preferred to one only arriving: the end of one direction is the start of the
+ * way back, and "where it goes from here" is what's useful - so a terminus describes the way out,
+ * and a stop at the very end of a sequence falls back to the way the bus came in. A route that
+ * passes in two different directions (a loop, say) lists both, as "NW/SE".
  */
 fun GtfsStaticData.headingsAtStop(stop: Stop): List<RouteHeading> =
     routesServingStop(stop.id).mapNotNull { shortName ->
@@ -29,12 +34,15 @@ fun GtfsStaticData.headingsAtStop(stop: Stop): List<RouteHeading> =
             patternsForRoute(route.id).values.forEach { pattern ->
                 val index = pattern.indexOf(stop.id)
                 if (index < 0) return@forEach
-                val before = pattern.getOrNull(index - 1)?.let(::stopById)?.let { LatLon(it.lat, it.lon) }
                 val here = LatLon(stop.lat, stop.lon)
-                val after = pattern.getOrNull(index + 1)?.let(::stopById)?.let { LatLon(it.lat, it.lon) }
-                when {
-                    after != null -> headingOf(before, here, after)?.let { departing += it }
-                    before != null -> headingOf(before, here, null)?.let { arriving += it }
+                fun positionOf(stopId: String?) = stopId?.let(::stopById)?.let { LatLon(it.lat, it.lon) }
+                if (index < pattern.lastIndex) {
+                    headingTowards(here, positionOf(pattern.last()), positionOf(pattern.getOrNull(index - 1)), positionOf(pattern[index + 1]))
+                        ?.let { departing += it }
+                } else {
+                    // The end of the line: all that's left is the way the bus came in, from where it started.
+                    positionOf(pattern.first())?.takeIf { index > 0 && distanceMeters(it, here) >= MIN_SEGMENT_METERS }
+                        ?.let { arriving += compassPoint(bearingDegrees(it, here)) }
                 }
             }
         }
@@ -44,14 +52,18 @@ fun GtfsStaticData.headingsAtStop(stop: Stop): List<RouteHeading> =
 
 private fun distanceMeters(a: LatLon, b: LatLon): Double = haversineMeters(a.lat, a.lon, b.lat, b.lon)
 
-/** Before-to-after is the truest picture of the road here; failing that, one side will do. */
-private fun headingOf(before: LatLon?, here: LatLon, after: LatLon?): String? {
+/**
+ * Towards the [terminus]. If that is practically where we're standing (a loop that ends where it
+ * began, say), the stops either side give the road's direction here instead.
+ */
+private fun headingTowards(here: LatLon, terminus: LatLon?, before: LatLon?, after: LatLon?): String? {
+    if (terminus != null && distanceMeters(here, terminus) >= MIN_TERMINUS_METERS) {
+        return compassPoint(bearingDegrees(here, terminus))
+    }
     val (from, to) = when {
         before != null && after != null && distanceMeters(before, after) >= MIN_SEGMENT_METERS -> before to after
         after != null -> here to after
-        before != null -> before to here
         else -> return null
     }
-    if (distanceMeters(from, to) < MIN_SEGMENT_METERS) return null
-    return compassPoint(bearingDegrees(from, to))
+    return if (distanceMeters(from, to) < MIN_SEGMENT_METERS) null else compassPoint(bearingDegrees(from, to))
 }
