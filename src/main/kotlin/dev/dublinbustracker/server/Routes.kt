@@ -2,6 +2,7 @@ package dev.dublinbustracker.server
 
 import dev.dublinbustracker.core.Polyline
 import dev.dublinbustracker.core.StopSearch
+import dev.dublinbustracker.data.headingsAtStop
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
@@ -65,7 +66,11 @@ fun Routing.configureRoutes(services: AppServices) {
                 call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown stop"))
                 return@get
             }
-            call.respond(stop.toResponse(staticData.current.routesServingStop(stop.id)))
+            val data = staticData.current
+            call.respond(
+                stop.toResponse(data.routesServingStop(stop.id))
+                    .copy(headings = data.headingsAtStop(stop).map { RouteHeadingResponse(it.route, it.compass) }),
+            )
         }
 
         get("/stops/{stopId}/arrivals") {

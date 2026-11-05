@@ -163,6 +163,23 @@ class RoutesTest {
     }
 
     @Test
+    fun `a single stop says which way each route heads there`() = testApplication {
+        startServer()
+        val stop = json.decodeFromString<StopResponse>(client.get("/v1/stops/s1").bodyAsText())
+
+        // Route 15 runs s1 -> s2, i.e. from Trinity College west to Heuston. 27 has no stop sequence.
+        assertEquals(listOf(RouteHeadingResponse("15", "W")), stop.headings)
+    }
+
+    @Test
+    fun `searching stops stays light and leaves out the headings`() = testApplication {
+        startServer()
+        val found = json.decodeFromString<List<StopResponse>>(client.get("/v1/stops?query=trinity").bodyAsText())
+
+        assertEquals(emptyList(), found.single().headings)
+    }
+
+    @Test
     fun `an unknown stop is a 404`() = testApplication {
         startServer()
         assertEquals(HttpStatusCode.NotFound, client.get("/v1/stops/nope").status)

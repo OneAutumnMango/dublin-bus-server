@@ -20,7 +20,12 @@ data class StopResponse(
     val lat: Double,
     val lon: Double,
     val routes: List<String> = emptyList(),
+    /** Which way each of those routes' buses heads at this stop. Only filled in when a single stop is asked for. */
+    val headings: List<RouteHeadingResponse> = emptyList(),
 )
+
+@Serializable
+data class RouteHeadingResponse(val route: String, val compass: String)
 
 @Serializable
 data class ArrivalResponse(
