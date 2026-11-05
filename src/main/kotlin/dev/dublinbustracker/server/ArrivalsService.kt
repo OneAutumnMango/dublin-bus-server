@@ -7,6 +7,7 @@ import dev.dublinbustracker.core.Arrival
 import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.StaticDataRef
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 private val SCHEDULE_ZONE: ZoneId = ZoneId.of("Europe/Dublin")
@@ -16,6 +17,13 @@ private const val SCHEDULED_LOOKAHEAD_SECONDS = 90 * 60L
 
 /** Small grace window so a scheduled call doesn't vanish the instant it's technically passed. */
 private const val SCHEDULED_PAST_GRACE_SECONDS = 2 * 60L
+
+/**
+ * GTFS times count from "noon minus 12h" of the service day, not from local midnight - the two
+ * differ by an hour on the days the clocks change, which would shift every call that day.
+ */
+private fun serviceDayStart(date: LocalDate): Long =
+    date.atTime(12, 0).atZone(SCHEDULE_ZONE).minusHours(12).toEpochSecond()
 
 private fun TripUpdate.isCancelled(): Boolean =
     trip.scheduleRelationship == TripDescriptor.ScheduleRelationship.CANCELED
@@ -151,7 +159,7 @@ class ArrivalsService(
         val today = Instant.ofEpochSecond(near).atZone(SCHEDULE_ZONE).toLocalDate()
         return sequenceOf(today, today.minusDays(1), today.plusDays(1))
             .filter { date -> staticData.current.isServiceActive(serviceId, date) }
-            .flatMap { date -> calls.asSequence().map { date.atStartOfDay(SCHEDULE_ZONE).toEpochSecond() + it.arrivalSecondsSinceMidnight } }
+            .flatMap { date -> calls.asSequence().map { serviceDayStart(date) + it.arrivalSecondsSinceMidnight } }
             .toList()
     }
 
@@ -179,7 +187,7 @@ class ArrivalsService(
                 // either day - try both and take whichever lands in the window we care about.
                 val epoch = sequenceOf(today, today.minusDays(1))
                     .filter { date -> staticData.current.isServiceActive(trip.serviceId, date) }
-                    .map { date -> date.atStartOfDay(SCHEDULE_ZONE).toEpochSecond() + call.arrivalSecondsSinceMidnight }
+                    .map { date -> serviceDayStart(date) + call.arrivalSecondsSinceMidnight }
                     .filter { it in (now - SCHEDULED_PAST_GRACE_SECONDS)..horizon }
                     .minOrNull() ?: return@mapNotNull null
 

@@ -400,6 +400,38 @@ class ArrivalsServiceTest {
         assertEquals(13, arrival.dueMinutes) // s2 is 10 min after s1, plus the 3 min delay
     }
 
+    // --- GTFS times on the days the clocks change -------------------------------
+
+    // A call "08:00" is 08:00 local on the service day. Ireland moves to IST at 01:00 UTC on
+    // 2024-03-31 and back to GMT at 01:00 UTC on 2024-10-27.
+    private fun dueMinutesAt08(now: String): Int =
+        scheduledService(bundleWithSchedule("1111111", 8 * 3600), Instant.parse(now).epochSecond)
+            .arrivalsForStop("s1").single().dueMinutes
+
+    @Test
+    fun `a scheduled time is read correctly on the day the clocks go forward`() {
+        // 08:00 IST is 07:00 UTC, so at 06:50 UTC the bus is 10 minutes away.
+        assertEquals(10, dueMinutesAt08("2024-03-31T06:50:00Z"))
+    }
+
+    @Test
+    fun `a scheduled time is read correctly on the day the clocks go back`() {
+        // 08:00 GMT is 08:00 UTC, so at 07:50 UTC the bus is 10 minutes away.
+        assertEquals(10, dueMinutesAt08("2024-10-27T07:50:00Z"))
+    }
+
+    @Test
+    fun `an overnight call after midnight still lands on the right day across a clock change`() {
+        // 25:30 on Saturday 2024-03-30's service is 01:30 local on the 31st - which doesn't exist
+        // (01:00 GMT jumps to 02:00 IST), and noon-minus-12h puts it at 02:30 IST = 01:30 UTC.
+        val svc = scheduledService(
+            bundleWithSchedule("1111111", 25 * 3600 + 30 * 60),
+            Instant.parse("2024-03-31T01:20:00Z").epochSecond,
+        )
+
+        assertEquals(10, svc.arrivalsForStop("s1").single().dueMinutes)
+    }
+
     // --- stop ordering and trips that call at a stop twice ---------------------
 
     /** One t1 bundle from `stop to offset-from-now-in-seconds` calls; a stop may repeat (a loop). */
