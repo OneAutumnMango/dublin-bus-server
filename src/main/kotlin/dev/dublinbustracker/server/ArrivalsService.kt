@@ -15,7 +15,7 @@ private val SCHEDULE_ZONE: ZoneId = ZoneId.of("Europe/Dublin")
 /** How far ahead a trip with no live update yet is still shown as "scheduled". */
 private const val SCHEDULED_LOOKAHEAD_SECONDS = 90 * 60L
 
-/** Small grace window so a scheduled call doesn't vanish the instant it's technically passed. */
+/** Small grace window so an arrival doesn't vanish the instant it's technically passed. */
 private const val SCHEDULED_PAST_GRACE_SECONDS = 2 * 60L
 
 /**
@@ -218,6 +218,9 @@ class ArrivalsService(
             .filter { it.stopId == stopId }
             .mapNotNull { stopTimeUpdate ->
                 val event = stopTimeUpdate.event(update.trip.tripId, now) ?: return@mapNotNull null
+                // The feed keeps listing stops a bus has already passed; without this a bus that
+                // left half an hour ago shows as "Due now".
+                if (event.time < now - SCHEDULED_PAST_GRACE_SECONDS) return@mapNotNull null
                 Arrival(
                     routeShortName = staticData.current.routeShortName(routeId),
                     destination = trip?.headsign.orEmpty(),
@@ -271,11 +274,16 @@ class ArrivalsService(
             .toList()
     }
 
-    /** The first stop this trip has a usable prediction for, i.e. where the bus currently is. */
-    private fun TripUpdate.firstReport(now: Long): Pair<String, TripUpdate.StopTimeEvent>? =
-        stopTimeUpdateList.asSequence()
+    /**
+     * Where the bus currently is: the first stop it hasn't passed yet. The feed also keeps the
+     * stops already passed, whose delays are stale, so those are skipped - unless every stop is
+     * behind it, when the last one is the best there is.
+     */
+    private fun TripUpdate.firstReport(now: Long): Pair<String, TripUpdate.StopTimeEvent>? {
+        val reports = stopTimeUpdateList.asSequence()
             .mapNotNull { stu -> stu.event(trip.tripId, now)?.let { stu.stopId to it } }
-            .firstOrNull()
+        return reports.firstOrNull { it.second.time >= now - SCHEDULED_PAST_GRACE_SECONDS } ?: reports.lastOrNull()
+    }
 
     /**
      * Prefers an event with an absolute time (arrival, then departure). The spec also allows an

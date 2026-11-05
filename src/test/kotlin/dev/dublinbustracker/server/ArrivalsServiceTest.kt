@@ -128,7 +128,24 @@ class ArrivalsServiceTest {
     }
 
     @Test
-    fun `times already in the past clamp to zero rather than going negative`() {
+    fun `a time just past clamps to zero rather than going negative`() {
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    entityId = "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 950)),
+                ),
+            ),
+        )
+
+        assertEquals(0, service.arrivalsForStop("s1").single().dueMinutes)
+    }
+
+    @Test
+    fun `a stop the bus passed long ago is not shown as due now`() {
+        // The feed keeps listing stops a bus has already passed; this one was 15 minutes ago.
         store.record(
             FeedKind.TRIP_UPDATES,
             Fixtures.feedOf(
@@ -140,7 +157,7 @@ class ArrivalsServiceTest {
             ),
         )
 
-        assertEquals(0, service.arrivalsForStop("s1").single().dueMinutes)
+        assertEquals(emptyList(), service.arrivalsForStop("s1"))
     }
 
     @Test
@@ -435,7 +452,14 @@ class ArrivalsServiceTest {
     // --- stop ordering and trips that call at a stop twice ---------------------
 
     /** One t1 bundle from `stop to offset-from-now-in-seconds` calls; a stop may repeat (a loop). */
-    private fun tripCalls(vararg calls: Pair<String, Int>): ArrivalsService {
+    private fun tripCalls(vararg calls: Pair<String, Int>): ArrivalsService =
+        tripCallsWith(
+            // The bus is at "mid", 3 minutes late.
+            listOf(Fixtures.stopTimeUpdate("mid", wednesdayMorning + 180, delaySeconds = 180)),
+            *calls,
+        )
+
+    private fun tripCallsWith(updates: List<TripUpdate.StopTimeUpdate>, vararg calls: Pair<String, Int>): ArrivalsService {
         val schedule = calls.groupBy({ it.first }, { it.second }).entries.joinToString(",") { (stop, offsets) ->
             "\"$stop\":[" + offsets.joinToString(",") { """{"t":"t1","s":${secondsSinceDublinMidnight + it}}""" } + "]"
         }
@@ -449,12 +473,7 @@ class ArrivalsServiceTest {
         store.record(
             FeedKind.TRIP_UPDATES,
             Fixtures.feedOf(
-                Fixtures.tripUpdateEntity(
-                    "e1",
-                    tripId = "t1",
-                    // The bus is at "mid", 3 minutes late.
-                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("mid", wednesdayMorning + 180, delaySeconds = 180)),
-                ),
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = updates),
             ),
         )
         return ArrivalsService(store, StaticDataRef(GtfsStaticData.parse(bundle)), nowEpochSeconds = { wednesdayMorning })
@@ -506,6 +525,36 @@ class ArrivalsServiceTest {
         )
 
         assertEquals(12, svc.arrivalsForStop("s2").single().dueMinutes)
+    }
+
+    // The real feed lists every stop of a trip, including ones the bus is long past.
+    @Test
+    fun `a bus that has already passed this stop is not shown, even though the feed still lists it`() {
+        val svc = tripCallsWith(
+            listOf(
+                Fixtures.stopTimeUpdate("passed", wednesdayMorning - 1800, delaySeconds = 0),
+                Fixtures.stopTimeUpdate("mid", wednesdayMorning + 120, delaySeconds = 120),
+            ),
+            "passed" to -1800, "mid" to 0,
+        )
+
+        assertEquals(emptyList(), svc.arrivalsForStop("passed"))
+    }
+
+    @Test
+    fun `the cascade uses the delay at the bus's current stop, not an old stale one`() {
+        val svc = tripCallsWith(
+            listOf(
+                Fixtures.stopTimeUpdate("passed", wednesdayMorning - 1800, delaySeconds = 0),
+                Fixtures.stopTimeUpdate("mid", wednesdayMorning + 300, delaySeconds = 300),
+            ),
+            "passed" to -1800, "mid" to 0, "ahead" to 1200,
+        )
+
+        val arrival = svc.arrivalsForStop("ahead").single()
+
+        assertEquals(300, arrival.delaySeconds) // from "mid", not the 0 reported at "passed"
+        assertEquals(25, arrival.dueMinutes)
     }
 
     // --- cancelled trips and skipped stops -------------------------------------
