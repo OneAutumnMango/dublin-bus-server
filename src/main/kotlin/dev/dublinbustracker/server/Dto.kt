@@ -33,6 +33,7 @@ data class ArrivalResponse(
     val expectedEpochSeconds: Long = 0,
     val delaySeconds: Int? = null,
     val vehicleId: String? = null,
+    val possiblyPassed: Boolean = false,
 )
 
 @Serializable
@@ -165,6 +166,7 @@ fun Arrival.toResponse() = ArrivalResponse(
     expectedEpochSeconds = expectedEpochSeconds,
     delaySeconds = delaySeconds,
     vehicleId = vehicleId,
+    possiblyPassed = possiblyPassed,
 )
 
 fun Route.toResponse() = RouteResponse(id, shortName, longName, agencyId)

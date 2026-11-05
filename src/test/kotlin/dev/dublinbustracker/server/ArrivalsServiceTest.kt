@@ -144,20 +144,68 @@ class ArrivalsServiceTest {
     }
 
     @Test
-    fun `a stop the bus passed long ago is not shown as due now`() {
-        // The feed keeps listing stops a bus has already passed; this one was 15 minutes ago.
+    fun `a time just past is not flagged as a possible ghost`() {
         store.record(
             FeedKind.TRIP_UPDATES,
             Fixtures.feedOf(
-                Fixtures.tripUpdateEntity(
-                    entityId = "e1",
-                    tripId = "t1",
-                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 100)),
-                ),
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 950))),
+            ),
+        )
+
+        assertFalse(service.arrivalsForStop("s1").single().possiblyPassed)
+    }
+
+    @Test
+    fun `a bus a few minutes past its prediction stays listed but is flagged as possibly passed`() {
+        // 200s past: beyond the 2 min grace, well inside the 15 min it stays visible.
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 800))),
+            ),
+        )
+
+        val arrival = service.arrivalsForStop("s1").single()
+
+        assertTrue(arrival.possiblyPassed)
+        assertEquals(0, arrival.dueMinutes)
+    }
+
+    @Test
+    fun `a stop the bus passed long ago is dropped altogether`() {
+        // The feed keeps listing stops a bus has already passed; 950s ago is past the 15 min limit.
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 50))),
             ),
         )
 
         assertEquals(emptyList(), service.arrivalsForStop("s1"))
+    }
+
+    @Test
+    fun `possibly passed buses sort after the real ones`() {
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 800))),
+                Fixtures.tripUpdateEntity("e2", tripId = "t2", stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", epochSeconds = 1_500))),
+            ),
+        )
+
+        assertEquals(listOf("t2", "t1"), service.arrivalsForStop("s1").map { it.tripId })
+    }
+
+    @Test
+    fun `a cascaded estimate that has slipped past is flagged too`() {
+        // "mid" was due 10 min ago and "ahead" 7 min ago, on time: the bus should have been through.
+        val svc = tripCallsWith(
+            listOf(Fixtures.stopTimeUpdate("mid", wednesdayMorning - 600, delaySeconds = 0)),
+            "mid" to -600, "ahead" to -420,
+        )
+
+        assertTrue(svc.arrivalsForStop("ahead").single().possiblyPassed)
     }
 
     @Test

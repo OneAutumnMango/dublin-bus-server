@@ -19,6 +19,12 @@ private const val SCHEDULED_LOOKAHEAD_SECONDS = 90 * 60L
 private const val SCHEDULED_PAST_GRACE_SECONDS = 2 * 60L
 
 /**
+ * A live prediction that has gone by stays listed (flagged) for this long, since the bus may
+ * just be running late. Past it, the bus is long gone - the feed keeps passed stops around.
+ */
+private const val PAST_VISIBLE_SECONDS = 15 * 60L
+
+/**
  * GTFS times count from "noon minus 12h" of the service day, not from local midnight - the two
  * differ by an hour on the days the clocks change, which would shift every call that day.
  */
@@ -88,7 +94,8 @@ class ArrivalsService(
         val scheduled = scheduledArrivalsForStop(stopId, now, wantedRouteIds, liveTripIds + suppressedTripIds)
 
         return (direct.asSequence() + cascaded.asSequence() + scheduled)
-            .sortedBy { it.expectedEpochSeconds }
+            // Ones that may already have left go last, so they never push a real bus down the list.
+            .sortedWith(compareBy({ it.possiblyPassed }, { it.expectedEpochSeconds }))
             .take(limit)
             .toList()
     }
@@ -127,7 +134,7 @@ class ArrivalsService(
             else -> { epoch -> epoch >= reportedScheduled }
         }
 
-        val window = (now - SCHEDULED_PAST_GRACE_SECONDS)..(now + SCHEDULED_LOOKAHEAD_SECONDS)
+        val window = (now - PAST_VISIBLE_SECONDS)..(now + SCHEDULED_LOOKAHEAD_SECONDS)
         return scheduledEpochs(tripId, stopId, trip.serviceId, reportedScheduled ?: now)
             .filter(isAhead)
             .map { it + delaySeconds }
@@ -144,6 +151,7 @@ class ArrivalsService(
                     expectedEpochSeconds = epoch,
                     delaySeconds = delaySeconds,
                     vehicleId = update.vehicle.id.orNullIfBlank(),
+                    possiblyPassed = epoch < now - SCHEDULED_PAST_GRACE_SECONDS,
                 )
             }
     }
@@ -220,7 +228,7 @@ class ArrivalsService(
                 val event = stopTimeUpdate.event(update.trip.tripId, now) ?: return@mapNotNull null
                 // The feed keeps listing stops a bus has already passed; without this a bus that
                 // left half an hour ago shows as "Due now".
-                if (event.time < now - SCHEDULED_PAST_GRACE_SECONDS) return@mapNotNull null
+                if (event.time < now - PAST_VISIBLE_SECONDS) return@mapNotNull null
                 Arrival(
                     routeShortName = staticData.current.routeShortName(routeId),
                     destination = trip?.headsign.orEmpty(),
@@ -232,6 +240,7 @@ class ArrivalsService(
                     expectedEpochSeconds = event.time,
                     delaySeconds = if (event.hasDelay()) event.delay else null,
                     vehicleId = update.vehicle.id.orNullIfBlank(),
+                    possiblyPassed = event.time < now - SCHEDULED_PAST_GRACE_SECONDS,
                 )
             }
     }
