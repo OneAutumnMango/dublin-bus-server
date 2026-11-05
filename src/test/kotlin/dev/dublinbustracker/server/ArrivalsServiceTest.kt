@@ -1,5 +1,6 @@
 package dev.dublinbustracker.server
 
+import com.google.transit.realtime.GtfsRealtime.TripUpdate
 import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.StaticDataRef
@@ -361,5 +362,41 @@ class ArrivalsServiceTest {
 
         assertEquals(1, arrivals.size)
         assertEquals(wednesdayMorning + 500, arrivals.single().expectedEpochSeconds)
+    }
+
+    // The spec lets a feed send only a delay (no absolute time) - the lateness must still count.
+    private fun delayOnlyUpdate(stopId: String, delaySeconds: Int): TripUpdate.StopTimeUpdate =
+        TripUpdate.StopTimeUpdate.newBuilder()
+            .setStopId(stopId)
+            .setArrival(TripUpdate.StopTimeEvent.newBuilder().setDelay(delaySeconds))
+            .build()
+
+    @Test
+    fun `a delay-only update is turned into a time using the trip's own schedule`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(delayOnlyUpdate("s1", 180)))),
+        )
+
+        val arrival = svc.arrivalsForStop("s1").single()
+
+        assertTrue(arrival.isRealtime)
+        assertEquals(180, arrival.delaySeconds)
+        assertEquals(wednesdayMorning + 180, arrival.expectedEpochSeconds)
+    }
+
+    @Test
+    fun `a delay-only update still cascades its lateness to a later stop`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(delayOnlyUpdate("s1", 180)))),
+        )
+
+        val arrival = svc.arrivalsForStop("s2").single()
+
+        assertTrue(arrival.isRealtime)
+        assertEquals(13, arrival.dueMinutes) // s2 is 10 min after s1, plus the 3 min delay
     }
 }

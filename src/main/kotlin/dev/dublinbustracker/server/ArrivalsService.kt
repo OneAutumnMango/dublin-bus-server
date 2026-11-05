@@ -80,7 +80,7 @@ class ArrivalsService(
         if (wantedRouteIds != null && trip.routeId !in wantedRouteIds) return null
 
         val (reportedStopId, reportedEvent) = update.stopTimeUpdateList.asSequence()
-            .mapNotNull { stu -> stu.event()?.let { stu.stopId to it } }
+            .mapNotNull { stu -> stu.event(tripId, now)?.let { stu.stopId to it } }
             .firstOrNull() ?: return null
 
         val delaySeconds = if (reportedEvent.hasDelay()) {
@@ -174,7 +174,7 @@ class ArrivalsService(
         return update.stopTimeUpdateList.asSequence()
             .filter { it.stopId == stopId }
             .mapNotNull { stopTimeUpdate ->
-                val event = stopTimeUpdate.event() ?: return@mapNotNull null
+                val event = stopTimeUpdate.event(update.trip.tripId, now) ?: return@mapNotNull null
                 Arrival(
                     routeShortName = staticData.current.routeShortName(routeId),
                     destination = trip?.headsign.orEmpty(),
@@ -201,7 +201,7 @@ class ArrivalsService(
             ?: return emptyList()
 
         return update.stopTimeUpdateList.mapNotNull { stopTimeUpdate ->
-            val event = stopTimeUpdate.event() ?: return@mapNotNull null
+            val event = stopTimeUpdate.event(tripId, nowEpochSeconds()) ?: return@mapNotNull null
             TripStopCall(
                 stopSequence = stopTimeUpdate.stopSequence,
                 stopId = stopTimeUpdate.stopId,
@@ -227,10 +227,17 @@ class ArrivalsService(
             .toList()
     }
 
-    /** Prefers arrival time, falling back to departure, matching how the NTA populates the feed. */
-    private fun TripUpdate.StopTimeUpdate.event(): TripUpdate.StopTimeEvent? = when {
-        hasArrival() && arrival.hasTime() -> arrival
-        hasDeparture() && departure.hasTime() -> departure
-        else -> null
+    /**
+     * Prefers an event with an absolute time (arrival, then departure). The spec also allows an
+     * event with only a delay, so that one gets its time filled in from the trip's own schedule
+     * at this stop rather than the lateness being thrown away.
+     */
+    private fun TripUpdate.StopTimeUpdate.event(tripId: String, near: Long): TripUpdate.StopTimeEvent? {
+        val candidates = listOfNotNull(arrival.takeIf { hasArrival() }, departure.takeIf { hasDeparture() })
+        candidates.firstOrNull { it.hasTime() }?.let { return it }
+        val delayOnly = candidates.firstOrNull { it.hasDelay() } ?: return null
+        val serviceId = staticData.current.trip(tripId)?.serviceId ?: return null
+        val scheduled = closestScheduledEpoch(tripId, stopId, serviceId, near) ?: return null
+        return delayOnly.toBuilder().setTime(scheduled + delayOnly.delay).build()
     }
 }
