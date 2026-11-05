@@ -400,6 +400,82 @@ class ArrivalsServiceTest {
         assertEquals(13, arrival.dueMinutes) // s2 is 10 min after s1, plus the 3 min delay
     }
 
+    // --- stop ordering and trips that call at a stop twice ---------------------
+
+    /** One t1 bundle from `stop to offset-from-now-in-seconds` calls; a stop may repeat (a loop). */
+    private fun tripCalls(vararg calls: Pair<String, Int>): ArrivalsService {
+        val schedule = calls.groupBy({ it.first }, { it.second }).entries.joinToString(",") { (stop, offsets) ->
+            "\"$stop\":[" + offsets.joinToString(",") { """{"t":"t1","s":${secondsSinceDublinMidnight + it}}""" } + "]"
+        }
+        val bundle = """{"version":3,
+            |"routes":[{"id":"r1","shortName":"15","longName":"","agencyId":"a1"}],
+            |"trips":{"t1":{"routeId":"r1","headsign":"Merrion Square","directionId":"0","shapeId":"","serviceId":"svc"}},
+            |"services":{"svc":{"weekdays":"1111111","start":"20240101","end":"20241231"}},
+            |"stopSchedule":{$schedule}}
+        """.trimMargin()
+        val store = FeedStore(historyDepth = 5)
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    // The bus is at "mid", 3 minutes late.
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("mid", wednesdayMorning + 180, delaySeconds = 180)),
+                ),
+            ),
+        )
+        return ArrivalsService(store, StaticDataRef(GtfsStaticData.parse(bundle)), nowEpochSeconds = { wednesdayMorning })
+    }
+
+    @Test
+    fun `a stop the bus has already passed is not given the bus's delay`() {
+        // "behind" was scheduled a minute ago; without an ordering check the cascade would
+        // report it as due now, and the timetable fallback would too.
+        val svc = tripCalls("behind" to -60, "mid" to 0, "ahead" to 600)
+
+        assertEquals(emptyList(), svc.arrivalsForStop("behind"))
+        assertEquals(13, svc.arrivalsForStop("ahead").single().dueMinutes)
+    }
+
+    @Test
+    fun `a loop trip's later visit to a stop is cascaded and its earlier visit is not`() {
+        // Visits "loop" at -10 min (already passed) and +20 min (still to come).
+        val svc = tripCalls("loop" to -600, "mid" to 0, "loop" to 1200)
+
+        val arrival = svc.arrivalsForStop("loop").single()
+
+        assertTrue(arrival.isRealtime)
+        assertEquals(wednesdayMorning + 1200 + 180, arrival.expectedEpochSeconds)
+    }
+
+    @Test
+    fun `a loop trip with two visits still to come shows both`() {
+        val svc = tripCalls("mid" to 0, "loop" to 300, "loop" to 1800)
+
+        val arrivals = svc.arrivalsForStop("loop")
+
+        assertEquals(listOf(wednesdayMorning + 480, wednesdayMorning + 1980), arrivals.map { it.expectedEpochSeconds })
+        assertTrue(arrivals.all { it.isRealtime })
+    }
+
+    @Test
+    fun `a delay reported at a stop missing from the timetable still cascades`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("unscheduled", wednesdayMorning + 120, delaySeconds = 120)),
+                ),
+            ),
+        )
+
+        assertEquals(12, svc.arrivalsForStop("s2").single().dueMinutes)
+    }
+
     // --- cancelled trips and skipped stops -------------------------------------
 
     private val skipped = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED
