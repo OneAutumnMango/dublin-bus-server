@@ -29,12 +29,14 @@ object Fixtures {
         stopSequence: Int = 0,
         delaySeconds: Int? = null,
         useDeparture: Boolean = false,
+        relationship: TripUpdate.StopTimeUpdate.ScheduleRelationship = TripUpdate.StopTimeUpdate.ScheduleRelationship.SCHEDULED,
     ): TripUpdate.StopTimeUpdate {
         val event = TripUpdate.StopTimeEvent.newBuilder().setTime(epochSeconds)
         if (delaySeconds != null) event.delay = delaySeconds
         val builder = TripUpdate.StopTimeUpdate.newBuilder()
             .setStopId(stopId)
             .setStopSequence(stopSequence)
+            .setScheduleRelationship(relationship)
         return if (useDeparture) builder.setDeparture(event).build() else builder.setArrival(event).build()
     }
 
@@ -44,9 +46,11 @@ object Fixtures {
         routeId: String = "",
         vehicleId: String? = null,
         stopTimeUpdates: List<TripUpdate.StopTimeUpdate> = emptyList(),
+        cancelled: Boolean = false,
     ): FeedEntity {
         val trip = TripDescriptor.newBuilder().setTripId(tripId)
         if (routeId.isNotEmpty()) trip.routeId = routeId
+        if (cancelled) trip.scheduleRelationship = TripDescriptor.ScheduleRelationship.CANCELED
         val update = TripUpdate.newBuilder()
             .setTrip(trip)
             .addAllStopTimeUpdate(stopTimeUpdates)

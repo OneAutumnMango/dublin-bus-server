@@ -399,4 +399,107 @@ class ArrivalsServiceTest {
         assertTrue(arrival.isRealtime)
         assertEquals(13, arrival.dueMinutes) // s2 is 10 min after s1, plus the 3 min delay
     }
+
+    // --- cancelled trips and skipped stops -------------------------------------
+
+    private val skipped = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED
+    private val noData = TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA
+
+    @Test
+    fun `a cancelled trip shows nowhere, not even as a scheduled fallback`() {
+        val (store, svc) = twoStopService()
+        // Cancellations commonly arrive with no stop_time_updates at all.
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", cancelled = true)),
+        )
+
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+        assertEquals(emptyList(), svc.arrivalsForStop("s2"))
+        assertEquals(emptyList(), svc.activeTripIds())
+        assertEquals(emptyList(), svc.tripStopCalls("t1"))
+    }
+
+    @Test
+    fun `a cancelled trip's own stop times are ignored too`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    cancelled = true,
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + 60)),
+                ),
+            ),
+        )
+
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+        assertEquals(emptyList(), svc.arrivalsForStop("s2"))
+    }
+
+    @Test
+    fun `a stop the trip skips shows no arrival, cascaded or scheduled`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", wednesdayMorning + 60, relationship = skipped),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+    }
+
+    @Test
+    fun `skipping one stop does not hide the trip at a stop it still serves`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", wednesdayMorning + 60, relationship = skipped),
+                        Fixtures.stopTimeUpdate("s2", wednesdayMorning + 700),
+                    ),
+                ),
+            ),
+        )
+
+        val arrival = svc.arrivalsForStop("s2").single()
+
+        assertTrue(arrival.isRealtime)
+        assertEquals(wednesdayMorning + 700, arrival.expectedEpochSeconds)
+    }
+
+    @Test
+    fun `a no-data stop time update is not used as a prediction`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", wednesdayMorning + 999, relationship = noData),
+                    ),
+                ),
+            ),
+        )
+
+        // No usable prediction, so s1 is left to the untouched timetable.
+        val arrival = svc.arrivalsForStop("s1").single()
+        assertFalse(arrival.isRealtime)
+        assertEquals(wednesdayMorning, arrival.expectedEpochSeconds)
+    }
 }

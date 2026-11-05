@@ -1,6 +1,7 @@
 package dev.dublinbustracker.server
 
 import com.google.transit.realtime.GtfsRealtime.FeedMessage
+import com.google.transit.realtime.GtfsRealtime.TripDescriptor
 import com.google.transit.realtime.GtfsRealtime.TripUpdate
 import dev.dublinbustracker.core.Arrival
 import dev.dublinbustracker.data.FeedKind
@@ -15,6 +16,12 @@ private const val SCHEDULED_LOOKAHEAD_SECONDS = 90 * 60L
 
 /** Small grace window so a scheduled call doesn't vanish the instant it's technically passed. */
 private const val SCHEDULED_PAST_GRACE_SECONDS = 2 * 60L
+
+private fun TripUpdate.isCancelled(): Boolean =
+    trip.scheduleRelationship == TripDescriptor.ScheduleRelationship.CANCELED
+
+private fun TripUpdate.StopTimeUpdate.isSkipped(): Boolean =
+    scheduleRelationship == TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED
 
 /** One live stop call on a trip, used to render a trip's progress along its route. */
 data class TripStopCall(
@@ -40,8 +47,15 @@ class ArrivalsService(
     fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50): List<Arrival> {
         val now = nowEpochSeconds()
         val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
-        val tripUpdates = feeds().asSequence().flatMap { it.entityList.asSequence() }
+        val allUpdates = feeds().asSequence().flatMap { it.entityList.asSequence() }
             .filter { it.hasTripUpdate() }.map { it.tripUpdate }.toList()
+
+        // A cancelled trip, or one that skips this very stop, must show nowhere - not even as a
+        // cascaded estimate or a "(scheduled)" fallback from the static timetable.
+        val suppressedTripIds = allUpdates.asSequence()
+            .filter { it.isCancelled() || it.stopTimeUpdateList.any { stu -> stu.stopId == stopId && stu.isSkipped() } }
+            .mapTo(HashSet()) { it.trip.tripId }
+        val tripUpdates = allUpdates.filter { it.trip.tripId !in suppressedTripIds }
 
         val direct = tripUpdates.asSequence()
             .flatMap { update -> arrivalsFrom(update, stopId, now, wantedRouteIds) }
@@ -61,7 +75,7 @@ class ArrivalsService(
         // Only a trip with no live presence anywhere in the feed (e.g. it hasn't left its
         // terminus yet) falls all the way back to the untouched static timetable.
         val liveTripIds = directTripIds + cascaded.map { it.tripId }
-        val scheduled = scheduledArrivalsForStop(stopId, now, wantedRouteIds, liveTripIds)
+        val scheduled = scheduledArrivalsForStop(stopId, now, wantedRouteIds, liveTripIds + suppressedTripIds)
 
         return (direct.asSequence() + cascaded.asSequence() + scheduled)
             .sortedBy { it.expectedEpochSeconds }
@@ -198,6 +212,7 @@ class ArrivalsService(
             .filter { it.hasTripUpdate() && it.tripUpdate.trip.tripId == tripId }
             .map { it.tripUpdate }
             .firstOrNull()
+            ?.takeUnless { it.isCancelled() }
             ?: return emptyList()
 
         return update.stopTimeUpdateList.mapNotNull { stopTimeUpdate ->
@@ -218,7 +233,7 @@ class ArrivalsService(
         return feeds()
             .asSequence()
             .flatMap { it.entityList.asSequence() }
-            .filter { it.hasTripUpdate() }
+            .filter { it.hasTripUpdate() && !it.tripUpdate.isCancelled() }
             .map { it.tripUpdate.trip.tripId }
             .filter { tripId ->
                 wantedRouteIds == null || staticData.current.trip(tripId)?.routeId in wantedRouteIds
@@ -233,6 +248,8 @@ class ArrivalsService(
      * at this stop rather than the lateness being thrown away.
      */
     private fun TripUpdate.StopTimeUpdate.event(tripId: String, near: Long): TripUpdate.StopTimeEvent? {
+        // A skipped stop has no arrival at all, and NO_DATA explicitly carries no prediction.
+        if (isSkipped() || scheduleRelationship == TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA) return null
         val candidates = listOfNotNull(arrival.takeIf { hasArrival() }, departure.takeIf { hasDeparture() })
         candidates.firstOrNull { it.hasTime() }?.let { return it }
         val delayOnly = candidates.firstOrNull { it.hasDelay() } ?: return null
