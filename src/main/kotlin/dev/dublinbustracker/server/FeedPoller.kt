@@ -69,9 +69,10 @@ class FeedPoller(
 
     fun start(scope: CoroutineScope) {
         scope.launch {
+            // Poll first, then wait, so the cache fills without holding up server startup.
             while (isActive) {
-                delay(intervalMs)
                 refreshAll()
+                delay(intervalMs)
             }
         }
     }

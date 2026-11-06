@@ -11,7 +11,6 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import org.slf4j.LoggerFactory
@@ -52,9 +51,6 @@ fun main() {
             config.ntaApiKeys.size,
             config.historyDepth,
         )
-
-        // Warm the cache so the first client request is served real data.
-        runBlocking { services.poller.refreshAll() }
 
         embeddedServer(Netty, port = config.port) { configureServer(services) }.start(wait = true)
     } catch (e: Throwable) {
