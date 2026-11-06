@@ -1,4 +1,5 @@
-FROM eclipse-temurin:21-jdk AS build
+# The jar is arch-independent, so build it natively and only run the small runtime stage per platform.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 
 # Optional corporate CA certificates; empty on a normal network.
 COPY certs/ /tmp/certs/
