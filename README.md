@@ -1,3 +1,5 @@
+> This is all vibe coded. Be warned. NEVER expose this server publicly.
+
 # Dublin Bus Server
 
 Caching API server for Irish public transport realtime data, built for the
