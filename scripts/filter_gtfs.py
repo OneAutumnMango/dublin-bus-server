@@ -22,6 +22,7 @@ it hasn't left its terminus). That makes it the largest part of the bundle - use
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 from collections import defaultdict
@@ -252,8 +253,11 @@ def main():
         },
     }
 
-    with open(args.out_file, "w", encoding="utf-8") as f:
+    # Write beside the target, then rename: a crash mid-write must never leave a half-written bundle.
+    tmp_file = args.out_file + ".tmp"
+    with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(bundle, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp_file, args.out_file)
 
     schedule_calls = sum(len(v) for v in bundle["stopSchedule"].values())
     print(
