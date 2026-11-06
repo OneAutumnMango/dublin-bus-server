@@ -56,6 +56,40 @@ class StaticDataRefresherTest {
     }
 
     @Test
+    fun `a script that writes half a bundle then fails leaves the previous bundle in place`() = runTest {
+        val dir = Files.createTempDirectory("refresher-test").toFile()
+        val script = fakeScript(dir, "printf '{\"stops\":[{\"id\"' > \"\$2\"\nexit 1")
+        val target = StaticDataRef(emptyBundle)
+        val refresher = StaticDataRefresher(
+            target = target,
+            outputPath = File(dir, "out.json").path,
+            intervalMs = 1,
+            scriptPath = script,
+        )
+
+        refresher.refresh()
+
+        assertSame(emptyBundle, target.current)
+    }
+
+    @Test
+    fun `a script that exits 0 but leaves unparseable output keeps the previous bundle`() = runTest {
+        val dir = Files.createTempDirectory("refresher-test").toFile()
+        val script = fakeScript(dir, "printf '{\"stops\":[' > \"\$2\"\nexit 0")
+        val target = StaticDataRef(emptyBundle)
+        val refresher = StaticDataRefresher(
+            target = target,
+            outputPath = File(dir, "out.json").path,
+            intervalMs = 1,
+            scriptPath = script,
+        )
+
+        refresher.refresh()
+
+        assertSame(emptyBundle, target.current)
+    }
+
+    @Test
     fun `a missing script is a no-op, not a crash`() = runTest {
         val dir = Files.createTempDirectory("refresher-test").toFile()
         val target = StaticDataRef(emptyBundle)
