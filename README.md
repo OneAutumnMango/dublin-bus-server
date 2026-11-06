@@ -25,7 +25,7 @@ curl localhost:8080/v1/status
 ```
 
 There is no server-side auth; this is meant to sit behind something that already gates access
-(e.g. a Cloudflare Access / Tunnel in front of it), not to be exposed directly.
+(e.g. a Cloudflare Access / Tunnel in front of it), not to be exposed directly. The compose file therefore publishes the port on `127.0.0.1` only; change it in `docker-compose.yml` if your gateway runs on another host.
 
 Set `REFRESH_GTFS_ON_START=true` to rebuild the bundle (timetables change periodically).
 
