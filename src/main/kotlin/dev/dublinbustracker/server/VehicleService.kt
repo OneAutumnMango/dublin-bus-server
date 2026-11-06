@@ -2,6 +2,7 @@ package dev.dublinbustracker.server
 
 import com.google.transit.realtime.GtfsRealtime.FeedEntity
 import dev.dublinbustracker.core.LatLon
+import dev.dublinbustracker.core.headingAlongPath
 import dev.dublinbustracker.core.VehicleFix
 import dev.dublinbustracker.core.VehiclePosition
 import dev.dublinbustracker.data.FeedKind
@@ -65,6 +66,9 @@ class VehicleService(
             .sortedBy { it.timestampEpochSeconds }
             .toList()
 
+    private fun headingOn(shapeId: String, here: LatLon): Float? =
+        if (shapeId.isEmpty()) null else headingAlongPath(staticData.current.shapePoints(shapeId), here)
+
     private fun latestEntities(): List<FeedEntity> =
         listOfNotNull(store.latest(FeedKind.VEHICLES), store.latest(FeedKind.COMBINED))
             .flatMap { it.feed.entityList }
@@ -75,6 +79,7 @@ class VehicleService(
         val vehicle = vehicle
         if (!vehicle.hasPosition()) return null
         val trip = staticData.current.trip(vehicle.trip.tripId)
+        val here = LatLon(vehicle.position.latitude.toDouble(), vehicle.position.longitude.toDouble())
         val routeId = trip?.routeId ?: vehicle.trip.routeId
         return VehiclePosition(
             vehicleId = vehicle.vehicle.id,
@@ -85,7 +90,8 @@ class VehicleService(
             headsign = trip?.headsign.orEmpty(),
             directionId = trip?.directionId ?: vehicle.trip.directionId.toString(),
             position = LatLon(vehicle.position.latitude.toDouble(), vehicle.position.longitude.toDouble()),
-            bearing = if (vehicle.position.hasBearing()) vehicle.position.bearing else null,
+            // Most buses report no bearing, so fall back to the way their trip's path runs where they are.
+            bearing = if (vehicle.position.hasBearing()) vehicle.position.bearing else trip?.let { headingOn(it.shapeId, here) },
             speed = if (vehicle.position.hasSpeed()) vehicle.position.speed else null,
             timestampEpochSeconds = vehicle.timestamp,
             currentStopId = vehicle.stopId.orNullIfBlank(),
