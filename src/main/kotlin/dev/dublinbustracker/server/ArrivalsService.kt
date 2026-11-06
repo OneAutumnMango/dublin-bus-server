@@ -162,7 +162,7 @@ class ArrivalsService(
      * a stop more than once yields one epoch per visit.
      */
     private fun scheduledEpochs(tripId: String, stopId: String, serviceId: String, near: Long): List<Long> {
-        val calls = staticData.current.scheduledCallsForStop(stopId).filter { it.tripId == tripId }
+        val calls = staticData.current.scheduledCallsForTripAtStop(stopId, tripId)
         if (calls.isEmpty()) return emptyList()
         val today = Instant.ofEpochSecond(near).atZone(SCHEDULE_ZONE).toLocalDate()
         return sequenceOf(today, today.minusDays(1), today.plusDays(1))

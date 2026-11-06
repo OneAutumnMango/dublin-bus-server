@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
 
 @Serializable
 private data class StopDto(val id: String, val code: String, val name: String, val lat: Double, val lon: Double)
@@ -37,8 +38,8 @@ private data class ServiceDto(
     val weekdays: String = "0000000",
     val start: String = "",
     val end: String = "",
-    val added: List<String> = emptyList(),
-    val removed: List<String> = emptyList(),
+    val added: Set<String> = emptySet(),
+    val removed: Set<String> = emptySet(),
 )
 
 /** Short field names: this is by far the highest-cardinality part of the bundle. */
@@ -94,6 +95,7 @@ class GtfsStaticData private constructor(
         .filter { it.shapeId.isNotEmpty() }
         .groupBy { it.routeId }
     private val decodedShapes = HashMap<String, List<LatLon>>()
+    private val callsByTripAtStop = ConcurrentHashMap<String, Map<String, List<ScheduledCall>>>()
 
     fun allStops(): List<Stop> = stops
 
@@ -143,6 +145,10 @@ class GtfsStaticData private constructor(
 
     /** A trip's scheduled calls at this stop, sorted by time, for the "not live yet" fallback. */
     fun scheduledCallsForStop(stopId: String): List<ScheduledCall> = stopSchedule[stopId].orEmpty()
+
+    /** The same calls, grouped by trip id; built per stop on first use so a trip's lookup isn't a scan of the whole stop. */
+    fun scheduledCallsForTripAtStop(stopId: String, tripId: String): List<ScheduledCall> =
+        callsByTripAtStop.getOrPut(stopId) { scheduledCallsForStop(stopId).groupBy { it.tripId } }[tripId].orEmpty()
 
     /**
      * Whether [serviceId]'s calendar runs on [date]: a per-date exception in calendar_dates.txt
