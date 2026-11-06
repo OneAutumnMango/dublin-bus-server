@@ -1,6 +1,5 @@
 package dev.dublinbustracker.server
 
-import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.StaticDataRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +40,7 @@ class StaticDataRefresher(
             val output = process.inputStream.bufferedReader().readText()
             val exitCode = process.waitFor()
             check(exitCode == 0) { "exit $exitCode: ${output.trim()}" }
-            val fresh = GtfsStaticData.parse(File(outputPath).readText())
+            val fresh = loadStaticData(outputPath)
             target.current = fresh
             logger.info("Refreshed static GTFS: {}", fresh.stats())
         }.onFailure { error ->

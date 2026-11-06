@@ -64,18 +64,16 @@ fun main() {
 }
 
 fun loadStaticData(path: String?): GtfsStaticData {
-    val text = if (path != null) {
+    if (path != null) {
         val file = File(path)
         require(file.isFile) {
             "GTFS_STATIC_PATH=$path not found - run scripts/fetch-gtfs-data.sh to generate it"
         }
-        file.readText()
-    } else {
-        val stream = GtfsStaticData::class.java.classLoader.getResourceAsStream(STATIC_RESOURCE_NAME)
-            ?: error("$STATIC_RESOURCE_NAME missing from the classpath - run scripts/fetch-gtfs-data.sh first")
-        stream.bufferedReader().use { it.readText() }
+        return file.inputStream().buffered().use { GtfsStaticData.parse(it) }
     }
-    return GtfsStaticData.parse(text)
+    val stream = GtfsStaticData::class.java.classLoader.getResourceAsStream(STATIC_RESOURCE_NAME)
+        ?: error("$STATIC_RESOURCE_NAME missing from the classpath - run scripts/fetch-gtfs-data.sh first")
+    return stream.buffered().use { GtfsStaticData.parse(it) }
 }
 
 fun Application.configureServer(services: AppServices) {

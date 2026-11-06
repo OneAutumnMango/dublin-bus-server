@@ -5,9 +5,12 @@ import dev.dublinbustracker.core.Polyline
 import dev.dublinbustracker.core.Route
 import dev.dublinbustracker.core.Stop
 import dev.dublinbustracker.core.Trip
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
+import java.io.InputStream
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
@@ -42,13 +45,6 @@ private data class ServiceDto(
     val removed: Set<String> = emptySet(),
 )
 
-/** Short field names: this is by far the highest-cardinality part of the bundle. */
-@Serializable
-private data class ScheduledCallDto(
-    @SerialName("t") val tripId: String,
-    @SerialName("s") val arrivalSecondsSinceMidnight: Int,
-)
-
 @Serializable
 private data class BundleDto(
     val version: Int = 1,
@@ -59,7 +55,7 @@ private data class BundleDto(
     val routePatterns: Map<String, Map<String, List<String>>> = emptyMap(),
     val stopRoutes: Map<String, List<String>> = emptyMap(),
     val services: Map<String, ServiceDto> = emptyMap(),
-    val stopSchedule: Map<String, List<ScheduledCallDto>> = emptyMap(),
+    val stopSchedule: Map<String, List<ScheduledCall>> = emptyMap(),
 )
 
 /** A trip's route short name and destination, resolved from the static bundle. */
@@ -69,7 +65,12 @@ data class TripInfo(val routeShortName: String, val headsign: String)
  * A trip's scheduled time at a stop. GTFS allows seconds-since-midnight past 24h for a trip
  * that runs into the next calendar day but is still counted under the previous service day.
  */
-data class ScheduledCall(val tripId: String, val arrivalSecondsSinceMidnight: Int)
+@Serializable
+data class ScheduledCall(
+    // Short field names: this is by far the highest-cardinality part of the bundle.
+    @SerialName("t") val tripId: String,
+    @SerialName("s") val arrivalSecondsSinceMidnight: Int,
+)
 
 private val GTFS_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
 
@@ -178,8 +179,13 @@ class GtfsStaticData private constructor(
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
-        fun parse(jsonText: String): GtfsStaticData {
-            val dto = json.decodeFromString<BundleDto>(jsonText)
+        fun parse(jsonText: String): GtfsStaticData = build(json.decodeFromString<BundleDto>(jsonText))
+
+        /** Streams the bundle instead of holding the whole (hundreds of MB) text in memory first. */
+        @OptIn(ExperimentalSerializationApi::class)
+        fun parse(stream: InputStream): GtfsStaticData = build(json.decodeFromStream<BundleDto>(stream))
+
+        private fun build(dto: BundleDto): GtfsStaticData {
             return GtfsStaticData(
                 stops = dto.stops.map { Stop(it.id, it.code, it.name, it.lat, it.lon) },
                 routes = dto.routes.map { Route(it.id, it.shortName, it.longName, it.agencyId) },
@@ -190,9 +196,7 @@ class GtfsStaticData private constructor(
                 routePatterns = dto.routePatterns,
                 stopRoutes = dto.stopRoutes,
                 services = dto.services,
-                stopSchedule = dto.stopSchedule.mapValues { (_, calls) ->
-                    calls.map { ScheduledCall(it.tripId, it.arrivalSecondsSinceMidnight) }
-                },
+                stopSchedule = dto.stopSchedule,
             )
         }
     }

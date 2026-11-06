@@ -166,8 +166,10 @@ curl "localhost:8080/v1/vehicles/226/history"    # where one has been
 
 ## Static GTFS bundle
 
+Memory: the bundle is parsed into millions of objects, and a refresh briefly holds the old and new bundles together, so size the container's RAM for two copies (the JVM may use 75% of it by default, see `JAVA_OPTS`).
+
 `scripts/fetch-gtfs-data.sh` downloads the ~700MB static GTFS zip and filters it to the three
-agencies, producing a ~36MB JSON bundle. `shapes.txt` and `stop_times.txt` dominate that zip,
+agencies, producing a JSON bundle of roughly 230MB (about 210MB of it the per-stop timetable). `shapes.txt` and `stop_times.txt` dominate that zip,
 so the script deduplicates and polyline-encodes shapes, and reduces stop times to one
 representative stop pattern per route and direction rather than retaining all 248k trips'
 timetables. Use `--no-shapes` or `--no-patterns` for a smaller bundle.
