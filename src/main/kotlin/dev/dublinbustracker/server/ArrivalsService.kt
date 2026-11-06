@@ -268,21 +268,6 @@ class ArrivalsService(
         }.sortedBy { it.stopSequence }
     }
 
-    /** Trip ids currently reporting updates, optionally limited to one route. */
-    fun activeTripIds(routeFilter: String? = null): List<String> {
-        val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
-        return feeds()
-            .asSequence()
-            .flatMap { it.entityList.asSequence() }
-            .filter { it.hasTripUpdate() && !it.tripUpdate.isCancelled() }
-            .map { it.tripUpdate.trip.tripId }
-            .filter { tripId ->
-                wantedRouteIds == null || staticData.current.trip(tripId)?.routeId in wantedRouteIds
-            }
-            .distinct()
-            .toList()
-    }
-
     /**
      * Where the bus currently is: the first stop it hasn't passed yet. The feed also keeps the
      * stops already passed, whose delays are stale, so those are skipped - unless every stop is

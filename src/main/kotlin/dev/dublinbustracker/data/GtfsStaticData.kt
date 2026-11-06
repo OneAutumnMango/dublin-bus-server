@@ -58,9 +58,6 @@ private data class BundleDto(
     val stopSchedule: Map<String, List<ScheduledCall>> = emptyMap(),
 )
 
-/** A trip's route short name and destination, resolved from the static bundle. */
-data class TripInfo(val routeShortName: String, val headsign: String)
-
 /**
  * A trip's scheduled time at a stop. GTFS allows seconds-since-midnight past 24h for a trip
  * that runs into the next calendar day but is still counted under the previous service day.
@@ -107,8 +104,6 @@ class GtfsStaticData private constructor(
     /** Stop numbers printed at the roadside are the GTFS stop_code, so accept either form. */
     fun stopByIdOrCode(idOrCode: String): Stop? = stopsById[idOrCode] ?: stopsByCode[idOrCode]
 
-    fun routeById(routeId: String): Route? = routesById[routeId]
-
     /** A bus number like "15" can map to several route variants, so this returns all of them. */
     fun routesByShortName(shortName: String): List<Route> = routesByShortNameIndex[shortName.lowercase()].orEmpty()
 
@@ -116,11 +111,6 @@ class GtfsStaticData private constructor(
         routesById[idOrShortName]?.let { listOf(it) } ?: routesByShortName(idOrShortName)
 
     fun trip(tripId: String): Trip? = trips[tripId]
-
-    fun tripInfo(tripId: String): TripInfo? {
-        val trip = trips[tripId] ?: return null
-        return TripInfo(routeShortName = routeShortName(trip.routeId), headsign = trip.headsign)
-    }
 
     fun routeShortName(routeId: String): String = routesById[routeId]?.shortName ?: routeId
 

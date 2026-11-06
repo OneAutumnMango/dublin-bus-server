@@ -16,9 +16,6 @@ object StopSearch {
         }
     }
 
-    fun nearestStops(lat: Double, lon: Double, stops: List<Stop>, limit: Int): List<Stop> =
-        stops.sortedBy { haversineMeters(lat, lon, it.lat, it.lon) }.take(limit)
-
     /** Stops within [radiusMeters], nearest first. */
     fun stopsWithinRadius(
         lat: Double,

@@ -83,14 +83,6 @@ class VehicleServiceTest {
     }
 
     @Test
-    fun `vehicles can be filtered to a bounding box`() {
-        recordVehicles()
-
-        val cityCentre = BoundingBox(53.30, -6.30, 53.36, -6.20)
-        assertEquals(listOf("bus-1"), service.vehiclesInBox(cityCentre).map { it.vehicleId })
-    }
-
-    @Test
     fun `a vehicle can be found by the trip it is running`() {
         recordVehicles()
 

@@ -43,10 +43,8 @@ class GtfsStaticDataTest {
     }
 
     @Test
-    fun `resolves trip metadata and route short names`() {
-        assertEquals(TripInfo("15", "Merrion Square"), data.tripInfo("t1"))
+    fun `resolves route short names`() {
         assertEquals("27", data.routeShortName("r3"))
-        assertNull(data.tripInfo("missing"))
     }
 
     @Test

@@ -26,11 +26,6 @@ class StopSearchTest {
     }
 
     @Test
-    fun `nearest stops are ordered by distance`() {
-        assertEquals(listOf(trinity, heuston), StopSearch.nearestStops(53.3441, -6.2578, stops, limit = 2))
-    }
-
-    @Test
     fun `radius search excludes stops beyond the radius`() {
         val within = StopSearch.stopsWithinRadius(53.3441, -6.2578, stops, radiusMeters = 3000.0, limit = 10)
         assertEquals(listOf(trinity, heuston), within)

@@ -37,9 +37,6 @@ class VehicleService(
         return allVehicles().filter { it.routeId in wanted }
     }
 
-    fun vehiclesInBox(box: BoundingBox): List<VehiclePosition> =
-        allVehicles().filter { box.contains(it.position) }
-
     fun vehicleById(vehicleId: String): VehiclePosition? =
         allVehicles().firstOrNull { it.vehicleId == vehicleId }
 

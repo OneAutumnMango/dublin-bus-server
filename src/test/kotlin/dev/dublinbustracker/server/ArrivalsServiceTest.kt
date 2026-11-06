@@ -227,14 +227,6 @@ class ArrivalsServiceTest {
     }
 
     @Test
-    fun `active trip ids can be listed and filtered by route`() {
-        recordTripUpdates()
-
-        assertEquals(setOf("t1", "t2"), service.activeTripIds().toSet())
-        assertEquals(listOf("t1"), service.activeTripIds(routeFilter = "15"))
-    }
-
-    @Test
     fun `the combined feed is read when trip updates are not polled separately`() {
         store.record(
             FeedKind.COMBINED,
@@ -621,7 +613,6 @@ class ArrivalsServiceTest {
 
         assertEquals(emptyList(), svc.arrivalsForStop("s1"))
         assertEquals(emptyList(), svc.arrivalsForStop("s2"))
-        assertEquals(emptyList(), svc.activeTripIds())
         assertEquals(emptyList(), svc.tripStopCalls("t1"))
     }
 
