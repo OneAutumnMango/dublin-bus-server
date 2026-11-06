@@ -95,10 +95,7 @@ Setting `POLL_INTERVAL_MS` below the safe minimum aborts startup, because the pr
 is HTTP 429s. Override with `ALLOW_UNSAFE_POLL_RATE=true` only if your keys have a raised
 limit. `/v1/status` reports the configured rate, the safe minimum, and the running call count.
 
-A poll that fails at the network level (timeout, connection reset) is retried up to twice more
-with backoff, since those are usually transient. A poll that fails with an HTTP error status
-(e.g. a 429) is not retried — retrying it immediately would just repeat it and burn more of the
-per-key budget.
+A failed poll is not retried within the cycle: the NTA may already have counted the call against the key's budget, so a retry risks a 429. The next cycle is the retry.
 
 ### Alerting
 
@@ -111,7 +108,7 @@ everything more severe than it:
 | `off` | Nothing |
 | `error` | The server failed to start |
 | `warn` | + a feed has failed 3 cycles in a row (likely stale) or just recovered |
-| `info` (default) | + every single poll failure, including transient ones already retried away |
+| `info` (default) | + every single poll failure |
 
 ### Backlog
 

@@ -117,42 +117,22 @@ class FeedPollerTest {
     }
 
     @Test
-    fun `a network-level failure is retried with backoff until it succeeds`() = runTest {
-        server.enqueue(protobufResponse("a"))
+    fun `a failed fetch is not retried within the cycle, whatever the cause`() = runTest {
         var attempts = 0
         val flaky = OkHttpClient.Builder()
-            .addInterceptor { chain ->
-                attempts++
-                if (attempts == 1) throw IOException("connection reset") else chain.proceed(chain.request())
-            }
+            .addInterceptor { _ -> attempts++; throw IOException("connection reset") }
             .build()
         val gtfsClient = RealtimeGtfsClient(listOf("k1"), flaky, baseUrl = server.url("/gtfsr/v2").toString())
-        val poller = FeedPoller(
-            gtfsClient,
-            FeedStore(historyDepth = 5),
-            listOf(FeedKind.TRIP_UPDATES),
-            intervalMs = 60_000,
-            retryBackoffMs = 1,
-        )
+        val poller = FeedPoller(gtfsClient, FeedStore(historyDepth = 5), listOf(FeedKind.TRIP_UPDATES), intervalMs = 60_000)
 
         poller.refreshAll()
 
-        assertEquals(2, attempts)
-        assertEquals(1, poller.successCount)
-        assertEquals(0, poller.failureCount)
-    }
-
-    @Test
-    fun `an http error status is not retried, unlike a network failure`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(429))
-        server.enqueue(protobufResponse("b"))
-        val poller = FeedPoller(client("k1"), FeedStore(historyDepth = 5), listOf(FeedKind.TRIP_UPDATES), intervalMs = 60_000)
-
-        poller.refreshAll()
-
-        // The enqueued success response is still waiting for the next cycle, not consumed as a retry.
-        assertEquals(1, server.requestCount)
+        assertEquals(1, attempts)
         assertEquals(1, poller.failureCount)
+
+        server.enqueue(MockResponse().setResponseCode(429))
+        FeedPoller(client("k1"), FeedStore(historyDepth = 5), listOf(FeedKind.TRIP_UPDATES), intervalMs = 60_000).refreshAll()
+        assertEquals(1, server.requestCount)
     }
 
     @Test
