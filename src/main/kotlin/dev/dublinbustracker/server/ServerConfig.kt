@@ -6,6 +6,9 @@ import dev.dublinbustracker.data.FeedKind
 /** Each NTA key allows one upstream call per this window. */
 const val RATE_LIMIT_WINDOW_MS = 60_000L
 
+/** Cycles cannot be closer together than this without exceeding the fair-usage limit. */
+private fun safePollIntervalMs(feedCount: Int, keyCount: Int): Long = RATE_LIMIT_WINDOW_MS * feedCount / keyCount
+
 data class ServerConfig(
     val port: Int,
     val ntaApiKeys: List<String>,
@@ -22,7 +25,7 @@ data class ServerConfig(
      * window, so cycles cannot be closer together than this without exceeding the fair-usage limit.
      */
     val minimumSafePollIntervalMs: Long
-        get() = RATE_LIMIT_WINDOW_MS * feeds.size / ntaApiKeys.size
+        get() = safePollIntervalMs(feeds.size, ntaApiKeys.size)
 
     val upstreamCallsPerMinute: Double
         get() = feeds.size * RATE_LIMIT_WINDOW_MS.toDouble() / pollIntervalMs
@@ -54,7 +57,7 @@ data class ServerConfig(
                     ?: error("HISTORY_DEPTH must be a positive integer, got '$it'")
             } ?: DEFAULT_HISTORY_DEPTH
 
-            val defaultInterval = RATE_LIMIT_WINDOW_MS * feeds.size / ntaApiKeys.size
+            val defaultInterval = safePollIntervalMs(feeds.size, ntaApiKeys.size)
             val pollIntervalMs = env("POLL_INTERVAL_MS")?.let {
                 it.toLongOrNull()?.takeIf { interval -> interval > 0 }
                     ?: error("POLL_INTERVAL_MS must be a positive integer, got '$it'")
