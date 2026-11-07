@@ -197,6 +197,15 @@ class RoutesTest {
     }
 
     @Test
+    fun `route arrivals come back for every stop on the route in one request`() = testApplication {
+        startServer()
+        val byStop = json.decodeFromString<Map<String, List<ArrivalResponse>>>(client.get("/v1/routes/15/arrivals?limit=2").bodyAsText())
+        assertEquals("bus-1", byStop.getValue("s1").single().vehicleId)
+        assertTrue(byStop.all { (_, arrivals) -> arrivals.all { it.routeShortName == "15" } })
+        assertEquals(HttpStatusCode.NotFound, client.get("/v1/routes/nope/arrivals").status)
+    }
+
+    @Test
     fun `arrivals for an unknown stop are a 404`() = testApplication {
         startServer()
         assertEquals(HttpStatusCode.NotFound, client.get("/v1/stops/nope/arrivals").status)

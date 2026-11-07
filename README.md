@@ -141,6 +141,7 @@ printed at the roadside. `limit` defaults to 50 and caps at 500.
 | `GET /v1/routes/{route}` | Route variants sharing a bus number |
 | `GET /v1/routes/{route}/stops?direction=` | Ordered stops along the route, per direction |
 | `GET /v1/routes/{route}/shape?direction=&format=points` | Route geometry as an encoded polyline |
+| `GET /v1/routes/{route}/arrivals?limit=` | Live arrivals at every stop on the route, by stop id (stops with none left out) |
 | `GET /v1/routes/{route}/vehicles` | Every bus currently running that route |
 | `GET /v1/vehicles?route=&bbox=&limit=` | Live positions, filterable by route or bounding box |
 | `GET /v1/vehicles/{id}` | One bus, with its route and trip |

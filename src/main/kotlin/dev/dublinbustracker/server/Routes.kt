@@ -113,6 +113,19 @@ fun Routing.configureRoutes(services: AppServices) {
             call.respond(RouteStopsResponse(route.id, route.shortName, directions))
         }
 
+        // Every stop on the route in one request, so a client labelling a whole route doesn't ask stop by stop.
+        // Stops with nothing coming are left out.
+        get("/routes/{route}/arrivals") {
+            val data = staticData.current
+            val identifier = call.parameters["route"].orEmpty()
+            val route = data.resolveRoutes(identifier).firstOrNull() ?: return@get call.notFound("unknown route")
+            val limit = call.limit()
+            val byStop = data.patternsForRoute(route.id).values.flatten().distinct().mapNotNull { stopId ->
+                services.arrivals.arrivalsForStop(stopId, identifier, limit).takeIf { it.isNotEmpty() }?.let { stopId to it.map { a -> a.toResponse() } }
+            }.toMap()
+            call.respond(byStop)
+        }
+
         get("/routes/{route}/shape") {
             val data = staticData.current
             val route = data.resolveRoutes(call.parameters["route"].orEmpty()).firstOrNull() ?: return@get call.notFound("unknown route")
