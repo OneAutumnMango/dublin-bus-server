@@ -924,4 +924,60 @@ class ArrivalsServiceTest {
     fun `a delay-less event on a single-visit stop is still matched`() {
         assertEquals(wednesdayMorning.toLong(), s1ArrivalAt(100)!!.scheduledEpochSeconds)
     }
+
+    // --- fix round 1: delay-only events, early side, day boundary ---------------------
+
+    private fun delayOnlyAt(stopId: String, seq: Int, delay: Int) =
+        TripUpdate.StopTimeUpdate.newBuilder().setStopId(stopId).setStopSequence(seq)
+            .setArrival(TripUpdate.StopTimeEvent.newBuilder().setDelay(delay)).build()
+
+    @Test
+    fun `delay-only events on a loop trip have no scheduled time for either visit`() {
+        val svc = tripCallsWith(listOf(delayOnlyAt("loop", 2, 60), delayOnlyAt("loop", 3, 60)), "loop" to 300, "loop" to 1800)
+
+        assertEquals(listOf(2, 3), svc.tripStopCalls("t1").map { it.stopSequence })
+        assertTrue(svc.tripStopCalls("t1").all { it.scheduledEpochSeconds == null })
+        assertTrue(svc.arrivalsForStop("loop").all { it.scheduledEpochSeconds == null })
+    }
+
+    @Test
+    fun `a lone delay-only event on a loop trip has no scheduled time`() {
+        val svc = tripCallsWith(listOf(delayOnlyAt("loop", 3, 60)), "loop" to 300, "loop" to 1800)
+
+        val arrival = svc.arrivalsForStop("loop").first { it.isRealtime && it.tripId == "t1" }
+        assertNull(arrival.scheduledEpochSeconds)
+        assertNull(svc.tripStopCalls("t1").single().scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `a delay-only event on a single-call stop keeps its exact scheduled time`() {
+        val svc = tripCallsWith(listOf(delayOnlyAt("x", 1, 60)), "x" to 300)
+
+        assertEquals(wednesdayMorning + 300L, svc.arrivalsForStop("x").single().scheduledEpochSeconds)
+        assertEquals(wednesdayMorning + 300L, svc.tripStopCalls("t1").single().scheduledEpochSeconds)
+    }
+
+    private fun xSlotAt(slotOffset: Int, eventOffset: Int) =
+        tripCallsWith(listOf(Fixtures.stopTimeUpdate("x", wednesdayMorning + eventOffset, stopSequence = 1)), "x" to slotOffset)
+            .arrivalsForStop("x").single().scheduledEpochSeconds
+
+    @Test
+    fun `early-side tolerance - a slot 2100s after the event matches and 2101s does not`() {
+        assertEquals(wednesdayMorning + 2100L, xSlotAt(2100, 300))
+        assertNull(xSlotAt(2101, 300))
+    }
+
+    @Test
+    fun `a call after midnight under yesterday's service matches today's early-morning event`() {
+        val now = Instant.parse("2024-01-11T00:05:00Z").epochSecond // Thursday 00:05; slot is Wed's 24:10
+        val bundle = bundleWithSchedule("1111111", 24 * 3600 + 600)
+        val store = FeedStore(historyDepth = 5)
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", now + 300)))),
+        )
+        val svc = ArrivalsService(store, StaticDataRef(GtfsStaticData.parse(bundle)), nowEpochSeconds = { now })
+
+        assertEquals(now + 300, svc.arrivalsForStop("s1").single().scheduledEpochSeconds)
+    }
 }

@@ -183,14 +183,19 @@ class ArrivalsService(
     /**
      * The timetable slot a live [event] belongs to: the call nearest its time less its delay.
      * Consumers key on this value, so null beats a guess: null when the nearest call is over
-     * [MAX_SCHEDULE_MATCH_SECONDS] away (stale bundle, retimed trip), or when a delay-less event
-     * on a trip that calls here more than once cannot say which visit it is.
+     * [MAX_SCHEDULE_MATCH_SECONDS] away (stale bundle, retimed trip), or when the update has no
+     * absolute time (delay-less event, or delay-only update whose time [event] filled in from
+     * "now") on a trip that calls here more than once - it cannot say which visit it is.
+     * shortcut: a delayed event whose delay disagrees with its time is matched by time less
+     * delay as given; the feed is trusted to be self-consistent.
      */
-    private fun scheduledFor(tripId: String, stopId: String, event: TripUpdate.StopTimeEvent): Long? {
+    private fun scheduledFor(tripId: String, stu: TripUpdate.StopTimeUpdate, event: TripUpdate.StopTimeEvent): Long? {
         val serviceId = staticData.current.trip(tripId)?.serviceId ?: return null
-        if (!event.hasDelay() && staticData.current.scheduledCallsForTripAtStop(stopId, tripId).size > 1) return null
+        val hasAbsoluteTime = listOfNotNull(stu.arrival.takeIf { stu.hasArrival() }, stu.departure.takeIf { stu.hasDeparture() })
+            .any { it.hasTime() }
+        if (!(event.hasDelay() && hasAbsoluteTime) && staticData.current.scheduledCallsForTripAtStop(stu.stopId, tripId).size > 1) return null
         val target = event.time - (if (event.hasDelay()) event.delay else 0)
-        return closestScheduledEpoch(tripId, stopId, serviceId, target)
+        return closestScheduledEpoch(tripId, stu.stopId, serviceId, target)
             ?.takeIf { kotlin.math.abs(it - target) <= MAX_SCHEDULE_MATCH_SECONDS }
     }
 
@@ -261,7 +266,7 @@ class ArrivalsService(
                     delaySeconds = if (event.hasDelay()) event.delay else null,
                     vehicleId = update.vehicle.id.orNullIfBlank(),
                     possiblyPassed = event.time < now - SCHEDULED_PAST_GRACE_SECONDS,
-                    scheduledEpochSeconds = scheduledFor(update.trip.tripId, stopId, event),
+                    scheduledEpochSeconds = scheduledFor(update.trip.tripId, stopTimeUpdate, event),
                 )
             }
     }
@@ -285,7 +290,7 @@ class ArrivalsService(
                 stopName = staticData.current.stopById(stopTimeUpdate.stopId)?.name.orEmpty(),
                 expectedEpochSeconds = event.time,
                 delaySeconds = if (event.hasDelay()) event.delay else null,
-                scheduledEpochSeconds = scheduledFor(tripId, stopTimeUpdate.stopId, event),
+                scheduledEpochSeconds = scheduledFor(tripId, stopTimeUpdate, event),
             )
         }.sortedBy { it.stopSequence }
     }
