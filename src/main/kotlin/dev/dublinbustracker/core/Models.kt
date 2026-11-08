@@ -40,6 +40,8 @@ data class Arrival(
     val vehicleId: String? = null,
     /** Its predicted time has gone by without the feed moving on, so it may already have left. */
     val possiblyPassed: Boolean = false,
+    /** The timetable time of this call, with no live delay applied; null when no timetable call matches. */
+    val scheduledEpochSeconds: Long? = null,
 )
 
 /** Where a bus is right now, from the Vehicles feed. */

@@ -154,6 +154,11 @@ printed at the roadside. `limit` defaults to 50 and caps at 500.
 [Google encoded polyline](https://developers.google.com/maps/documentation/utilities/polylinealgorithm);
 add `format=points` to also get expanded `[lat, lon]` pairs.
 
+Every arrival (stop and route endpoints) and every `stopCalls[]` entry of `/v1/trips/{id}`
+carries `scheduledEpochSeconds`: the timetable time of that call, before any live delay
+(`expectedEpochSeconds` minus `delaySeconds` for a delayed bus; equal to `expectedEpochSeconds`
+for a scheduled-only arrival). It is omitted (null) only when no timetable call matches.
+
 `GET /arrivals?stopId=` and `GET /stops?query=` are kept unversioned and unchanged for the
 Android app that already ships against them.
 

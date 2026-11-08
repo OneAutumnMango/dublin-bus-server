@@ -698,4 +698,166 @@ class ArrivalsServiceTest {
         assertFalse(arrival.isRealtime)
         assertEquals(wednesdayMorning, arrival.expectedEpochSeconds)
     }
+
+    // --- scheduledEpochSeconds: the timetable time, independent of any live prediction ---
+
+    @Test
+    fun `direct realtime arrival carries scheduledEpochSeconds equal to the timetable call`() {
+        val (store, svc) = twoStopService()
+        // 100s late at s1, where the timetable says "now"; the delay-less event is matched by time.
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1", tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + 100, delaySeconds = 100)),
+                ),
+            ),
+        )
+
+        val arrival = svc.arrivalsForStop("s1").single()
+
+        assertTrue(arrival.isRealtime)
+        assertEquals(wednesdayMorning + 100, arrival.expectedEpochSeconds)
+        assertEquals(wednesdayMorning.toLong(), arrival.scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `direct arrival without a feed delay still finds its timetable call`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1", tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s2", wednesdayMorning + 500)),
+                ),
+            ),
+        )
+
+        val arrival = svc.arrivalsForStop("s2").single()
+
+        assertNull(arrival.delaySeconds)
+        assertEquals(wednesdayMorning + 600L, arrival.scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `cascaded arrival scheduled == timetable epoch (expected - delay)`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1", tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + 180, delaySeconds = 180)),
+                ),
+            ),
+        )
+
+        val arrival = svc.arrivalsForStop("s2").single()
+
+        assertEquals(wednesdayMorning + 600L + 180, arrival.expectedEpochSeconds)
+        assertEquals(wednesdayMorning + 600L, arrival.scheduledEpochSeconds)
+        assertEquals(arrival.expectedEpochSeconds - arrival.delaySeconds!!, arrival.scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `static fallback arrival scheduled == expected`() {
+        val svc = scheduledService(bundleWithSchedule("1111111", secondsSinceDublinMidnight + 600))
+
+        val arrival = svc.arrivalsForStop("s1").single()
+
+        assertFalse(arrival.isRealtime)
+        assertEquals(wednesdayMorning + 600L, arrival.scheduledEpochSeconds)
+        assertEquals(arrival.expectedEpochSeconds, arrival.scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `a loop trip's direct arrivals each get their own scheduled time`() {
+        // Scheduled at "loop" +5 min and +30 min; the bus is 3 min late and reports both visits.
+        val svc = tripCallsWith(
+            listOf(
+                Fixtures.stopTimeUpdate("loop", wednesdayMorning + 480, stopSequence = 2, delaySeconds = 180),
+                Fixtures.stopTimeUpdate("loop", wednesdayMorning + 1980, stopSequence = 3, delaySeconds = 180),
+            ),
+            "loop" to 300, "loop" to 1800,
+        )
+
+        val arrivals = svc.arrivalsForStop("loop")
+
+        assertEquals(listOf(wednesdayMorning + 480, wednesdayMorning + 1980), arrivals.map { it.expectedEpochSeconds })
+        assertEquals(listOf(wednesdayMorning + 300L, wednesdayMorning + 1800L), arrivals.map { it.scheduledEpochSeconds })
+    }
+
+    @Test
+    fun `a loop trip's cascaded arrivals each get their own scheduled time`() {
+        val svc = tripCalls("mid" to 0, "loop" to 300, "loop" to 1800)
+
+        val arrivals = svc.arrivalsForStop("loop")
+
+        assertEquals(listOf(wednesdayMorning + 480, wednesdayMorning + 1980), arrivals.map { it.expectedEpochSeconds })
+        assertEquals(listOf(wednesdayMorning + 300L, wednesdayMorning + 1800L), arrivals.map { it.scheduledEpochSeconds })
+    }
+
+    @Test
+    fun `tripStopCalls include scheduledEpochSeconds`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1", tripId = "t1",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", wednesdayMorning + 100, stopSequence = 1, delaySeconds = 100),
+                        Fixtures.stopTimeUpdate("s2", wednesdayMorning + 700, stopSequence = 2, delaySeconds = 100),
+                    ),
+                ),
+            ),
+        )
+
+        val calls = svc.tripStopCalls("t1")
+
+        assertEquals(listOf(wednesdayMorning.toLong(), wednesdayMorning + 600L), calls.map { it.scheduledEpochSeconds })
+    }
+
+    @Test
+    fun `a loop trip's stop calls each get their own scheduled time`() {
+        val svc = tripCallsWith(
+            listOf(
+                Fixtures.stopTimeUpdate("loop", wednesdayMorning + 480, stopSequence = 2, delaySeconds = 180),
+                Fixtures.stopTimeUpdate("loop", wednesdayMorning + 1980, stopSequence = 3, delaySeconds = 180),
+            ),
+            "loop" to 300, "loop" to 1800,
+        )
+
+        val calls = svc.tripStopCalls("t1")
+
+        assertEquals(listOf(wednesdayMorning + 300L, wednesdayMorning + 1800L), calls.map { it.scheduledEpochSeconds })
+    }
+
+    @Test
+    fun `scheduledEpochSeconds is null when no timetable call matches`() {
+        // The default fixture bundle has no stop schedule, so nothing can be matched.
+        recordTripUpdates()
+
+        assertTrue(service.arrivalsForStop("s1").all { it.scheduledEpochSeconds == null })
+        assertTrue(service.tripStopCalls("t1").all { it.scheduledEpochSeconds == null })
+    }
+
+    @Test
+    fun `scheduledEpochSeconds is null for a stop the timetable lacks for that trip`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1", tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s9", wednesdayMorning + 100, stopSequence = 1)),
+                ),
+            ),
+        )
+
+        assertNull(svc.arrivalsForStop("s9").single().scheduledEpochSeconds)
+        assertNull(svc.tripStopCalls("t1").single().scheduledEpochSeconds)
+    }
 }

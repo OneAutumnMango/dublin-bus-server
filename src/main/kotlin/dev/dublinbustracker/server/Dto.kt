@@ -39,6 +39,7 @@ data class ArrivalResponse(
     val delaySeconds: Int? = null,
     val vehicleId: String? = null,
     val possiblyPassed: Boolean = false,
+    val scheduledEpochSeconds: Long? = null,
 )
 
 @Serializable
@@ -106,6 +107,7 @@ data class TripStopCallResponse(
     val stopName: String,
     val expectedEpochSeconds: Long,
     val delaySeconds: Int? = null,
+    val scheduledEpochSeconds: Long? = null,
 )
 
 @Serializable
@@ -172,6 +174,7 @@ fun Arrival.toResponse() = ArrivalResponse(
     delaySeconds = delaySeconds,
     vehicleId = vehicleId,
     possiblyPassed = possiblyPassed,
+    scheduledEpochSeconds = scheduledEpochSeconds,
 )
 
 fun Route.toResponse() = RouteResponse(id, shortName, longName, agencyId)
@@ -199,6 +202,6 @@ fun ServiceAlert.toResponse() = AlertResponse(
     id, cause, effect, header, description, url, routeIds, stopIds, startEpochSeconds, endEpochSeconds,
 )
 
-fun TripStopCall.toResponse() = TripStopCallResponse(stopSequence, stopId, stopName, expectedEpochSeconds, delaySeconds)
+fun TripStopCall.toResponse() = TripStopCallResponse(stopSequence, stopId, stopName, expectedEpochSeconds, delaySeconds, scheduledEpochSeconds)
 
 fun List<LatLon>.toPointPairs(): List<List<Double>> = map { listOf(it.lat, it.lon) }

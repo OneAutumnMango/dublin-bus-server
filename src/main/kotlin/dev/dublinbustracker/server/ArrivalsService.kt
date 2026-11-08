@@ -44,6 +44,7 @@ data class TripStopCall(
     val stopName: String,
     val expectedEpochSeconds: Long,
     val delaySeconds: Int?,
+    val scheduledEpochSeconds: Long? = null,
 )
 
 /**
@@ -137,9 +138,9 @@ class ArrivalsService(
         val window = (now - PAST_VISIBLE_SECONDS)..(now + SCHEDULED_LOOKAHEAD_SECONDS)
         return scheduledEpochs(tripId, stopId, trip.serviceId, reportedScheduled ?: now)
             .filter(isAhead)
-            .map { it + delaySeconds }
-            .filter { it in window }
-            .map { epoch ->
+            .map { it to it + delaySeconds }
+            .filter { (_, epoch) -> epoch in window }
+            .map { (scheduled, epoch) ->
                 Arrival(
                     routeShortName = staticData.current.routeShortName(trip.routeId),
                     destination = trip.headsign,
@@ -152,6 +153,7 @@ class ArrivalsService(
                     delaySeconds = delaySeconds,
                     vehicleId = update.vehicle.id.orNullIfBlank(),
                     possiblyPassed = epoch < now - SCHEDULED_PAST_GRACE_SECONDS,
+                    scheduledEpochSeconds = scheduled,
                 )
             }
     }
@@ -174,6 +176,16 @@ class ArrivalsService(
     /** The scheduled epoch of [tripId] at [stopId] nearest [near], used to line a live event up with its schedule slot. */
     private fun closestScheduledEpoch(tripId: String, stopId: String, serviceId: String, near: Long): Long? =
         scheduledEpochs(tripId, stopId, serviceId, near).minByOrNull { kotlin.math.abs(it - near) }
+
+    /**
+     * The timetable slot a live [event] belongs to: the call nearest its time less its delay.
+     * shortcut: on a loop trip a delay-less event later than half the gap between visits could
+     * match the wrong visit; the feed normally sends delays, so revisit if it ever shows up.
+     */
+    private fun scheduledFor(tripId: String, stopId: String, event: TripUpdate.StopTimeEvent): Long? {
+        val serviceId = staticData.current.trip(tripId)?.serviceId ?: return null
+        return closestScheduledEpoch(tripId, stopId, serviceId, event.time - (if (event.hasDelay()) event.delay else 0))
+    }
 
     private fun scheduledArrivalsForStop(
         stopId: String,
@@ -208,6 +220,7 @@ class ArrivalsService(
                     routeId = trip.routeId,
                     stopId = stopId,
                     expectedEpochSeconds = epoch,
+                    scheduledEpochSeconds = epoch,
                 )
             }
     }
@@ -241,6 +254,7 @@ class ArrivalsService(
                     delaySeconds = if (event.hasDelay()) event.delay else null,
                     vehicleId = update.vehicle.id.orNullIfBlank(),
                     possiblyPassed = event.time < now - SCHEDULED_PAST_GRACE_SECONDS,
+                    scheduledEpochSeconds = scheduledFor(update.trip.tripId, stopId, event),
                 )
             }
     }
@@ -264,6 +278,7 @@ class ArrivalsService(
                 stopName = staticData.current.stopById(stopTimeUpdate.stopId)?.name.orEmpty(),
                 expectedEpochSeconds = event.time,
                 delaySeconds = if (event.hasDelay()) event.delay else null,
+                scheduledEpochSeconds = scheduledFor(tripId, stopTimeUpdate.stopId, event),
             )
         }.sortedBy { it.stopSequence }
     }

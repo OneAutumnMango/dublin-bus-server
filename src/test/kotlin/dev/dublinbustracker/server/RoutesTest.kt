@@ -368,4 +368,26 @@ class RoutesTest {
         assertEquals(1, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts?stop=s1").bodyAsText()).size)
         assertEquals(0, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts?stop=s2").bodyAsText()).size)
     }
+
+    // --- scheduledEpochSeconds on the wire ---------------------------------------
+
+    private val wireJson = Json { encodeDefaults = true; explicitNulls = false }
+
+    @Test
+    fun `scheduledEpochSeconds is serialized on arrivals and trip stop calls`() {
+        val arrival = dev.dublinbustracker.core.Arrival("15", "Dest", 3, true, scheduledEpochSeconds = 1_700_000_000L)
+        val call = TripStopCall(1, "s1", "Stop", 1_700_000_060L, 60, scheduledEpochSeconds = 1_700_000_000L)
+
+        assertTrue(wireJson.encodeToString(arrival.toResponse()).contains("\"scheduledEpochSeconds\":1700000000"))
+        assertTrue(wireJson.encodeToString(call.toResponse()).contains("\"scheduledEpochSeconds\":1700000000"))
+        assertEquals(1_700_000_000L, wireJson.decodeFromString<ArrivalResponse>(wireJson.encodeToString(arrival.toResponse())).scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `a missing scheduledEpochSeconds is omitted and decodes as null`() {
+        val text = wireJson.encodeToString(dev.dublinbustracker.core.Arrival("15", "Dest", 3, true).toResponse())
+
+        assertTrue(!text.contains("scheduledEpochSeconds"))
+        assertNull(wireJson.decodeFromString<ArrivalResponse>(text).scheduledEpochSeconds)
+    }
 }
