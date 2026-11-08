@@ -20,8 +20,8 @@ import kotlin.test.assertTrue
 class RoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun services(): AppServices {
-        val staticData = StaticDataRef(GtfsStaticData.parse(Fixtures.staticBundleJson()))
+    private fun services(bundle: String = Fixtures.staticBundleJson()): AppServices {
+        val staticData = StaticDataRef(GtfsStaticData.parse(bundle))
         val config = ServerConfig(
             port = 0,
             ntaApiKeys = listOf("nta-key"),
@@ -75,8 +75,8 @@ class RoutesTest {
         )
     }
 
-    private fun ApplicationTestBuilder.startServer() {
-        application { configureServer(services()) }
+    private fun ApplicationTestBuilder.startServer(bundle: String = Fixtures.staticBundleJson()) {
+        application { configureServer(services(bundle)) }
     }
 
     @Test
@@ -389,5 +389,50 @@ class RoutesTest {
 
         assertTrue(!text.contains("scheduledEpochSeconds"))
         assertNull(wireJson.decodeFromString<ArrivalResponse>(text).scheduledEpochSeconds)
+    }
+
+    // --- the real HTTP bodies, through Main.kt's Json configuration ----------------
+
+    /** t1 is timetabled 5 min after now at s1 and 10 min after at s2, matching the seeded live times. */
+    private fun scheduledBundle(): String {
+        val now = System.currentTimeMillis() / 1000
+        val dayStart = java.time.Instant.ofEpochSecond(now).atZone(java.time.ZoneId.of("Europe/Dublin")).toLocalDate()
+            .atTime(12, 0).atZone(java.time.ZoneId.of("Europe/Dublin")).minusHours(12).toEpochSecond()
+        val secs = now - dayStart
+        return Fixtures.staticBundleJson()
+            .replace("\"shapeId\":\"sh1\"}", "\"shapeId\":\"sh1\",\"serviceId\":\"svc\"}")
+            .replace(
+                "\"shapes\":",
+                "\"services\":{\"svc\":{\"weekdays\":\"1111111\",\"start\":\"20200101\",\"end\":\"20991231\"}}," +
+                    "\"stopSchedule\":{\"s1\":[{\"t\":\"t1\",\"s\":${secs + 300}}],\"s2\":[{\"t\":\"t1\",\"s\":${secs + 600}}]}," +
+                    "\"shapes\":",
+            )
+    }
+
+    private val key = "\"scheduledEpochSeconds\":"
+
+    @Test
+    fun `http bodies carry scheduledEpochSeconds when a timetable call matches`() = testApplication {
+        startServer(scheduledBundle())
+
+        val stop = client.get("/v1/stops/s1/arrivals").bodyAsText()
+        val route = client.get("/v1/routes/15/arrivals").bodyAsText()
+        val trip = client.get("/v1/trips/t1").bodyAsText()
+
+        assertTrue(stop.contains(key), stop)
+        assertTrue(route.contains(key), route)
+        assertTrue(trip.contains(key), trip)
+        assertEquals(2, Regex(key).findAll(trip).count())
+        assertEquals(2, Regex(key).findAll(route).count()) // s1 and s2
+    }
+
+    @Test
+    fun `http bodies omit scheduledEpochSeconds when nothing matches`() = testApplication {
+        startServer()
+
+        val bodies = listOf("/v1/stops/s1/arrivals", "/v1/routes/15/arrivals", "/v1/trips/t1").map { client.get(it).bodyAsText() }
+
+        bodies.forEach { assertTrue(it.contains("expectedEpochSeconds"), it) }
+        bodies.forEach { assertTrue(!it.contains("scheduledEpochSeconds"), it) }
     }
 }
