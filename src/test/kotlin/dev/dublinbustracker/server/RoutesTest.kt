@@ -369,33 +369,10 @@ class RoutesTest {
         assertEquals(0, json.decodeFromString<List<AlertResponse>>(client.get("/v1/alerts?stop=s2").bodyAsText()).size)
     }
 
-    // --- scheduledEpochSeconds on the wire ---------------------------------------
-
-    private val wireJson = Json { encodeDefaults = true; explicitNulls = false }
-
-    @Test
-    fun `scheduledEpochSeconds is serialized on arrivals and trip stop calls`() {
-        val arrival = dev.dublinbustracker.core.Arrival("15", "Dest", 3, true, scheduledEpochSeconds = 1_700_000_000L)
-        val call = TripStopCall(1, "s1", "Stop", 1_700_000_060L, 60, scheduledEpochSeconds = 1_700_000_000L)
-
-        assertTrue(wireJson.encodeToString(arrival.toResponse()).contains("\"scheduledEpochSeconds\":1700000000"))
-        assertTrue(wireJson.encodeToString(call.toResponse()).contains("\"scheduledEpochSeconds\":1700000000"))
-        assertEquals(1_700_000_000L, wireJson.decodeFromString<ArrivalResponse>(wireJson.encodeToString(arrival.toResponse())).scheduledEpochSeconds)
-    }
-
-    @Test
-    fun `a missing scheduledEpochSeconds is omitted and decodes as null`() {
-        val text = wireJson.encodeToString(dev.dublinbustracker.core.Arrival("15", "Dest", 3, true).toResponse())
-
-        assertTrue(!text.contains("scheduledEpochSeconds"))
-        assertNull(wireJson.decodeFromString<ArrivalResponse>(text).scheduledEpochSeconds)
-    }
-
     // --- the real HTTP bodies, through Main.kt's Json configuration ----------------
 
     /** t1 is timetabled 5 min after now at s1 and 10 min after at s2, matching the seeded live times. */
-    private fun scheduledBundle(): String {
-        val now = System.currentTimeMillis() / 1000
+    private fun scheduledBundle(now: Long): String {
         val dayStart = java.time.Instant.ofEpochSecond(now).atZone(java.time.ZoneId.of("Europe/Dublin")).toLocalDate()
             .atTime(12, 0).atZone(java.time.ZoneId.of("Europe/Dublin")).minusHours(12).toEpochSecond()
         val secs = now - dayStart
@@ -412,18 +389,16 @@ class RoutesTest {
     private val key = "\"scheduledEpochSeconds\":"
 
     @Test
-    fun `http bodies carry scheduledEpochSeconds when a timetable call matches`() = testApplication {
-        startServer(scheduledBundle())
+    fun `http bodies carry scheduledEpochSeconds equal to the seeded slot`() = testApplication {
+        val now = System.currentTimeMillis() / 1000
+        startServer(scheduledBundle(now))
+        val values = Regex("\"scheduledEpochSeconds\":(\\d+)")
 
-        val stop = client.get("/v1/stops/s1/arrivals").bodyAsText()
-        val route = client.get("/v1/routes/15/arrivals").bodyAsText()
-        val trip = client.get("/v1/trips/t1").bodyAsText()
+        suspend fun slots(path: String) = values.findAll(client.get(path).bodyAsText()).map { it.groupValues[1].toLong() }.toList()
 
-        assertTrue(stop.contains(key), stop)
-        assertTrue(route.contains(key), route)
-        assertTrue(trip.contains(key), trip)
-        assertEquals(2, Regex(key).findAll(trip).count())
-        assertEquals(2, Regex(key).findAll(route).count()) // s1 and s2
+        assertEquals(listOf(now + 300), slots("/v1/stops/s1/arrivals"))
+        assertEquals(listOf(now + 300, now + 600), slots("/v1/routes/15/arrivals"))
+        assertEquals(listOf(now + 300, now + 600), slots("/v1/trips/t1"))
     }
 
     @Test
