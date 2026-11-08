@@ -15,6 +15,9 @@ private val SCHEDULE_ZONE: ZoneId = ZoneId.of("Europe/Dublin")
 /** How far ahead a trip with no live update yet is still shown as "scheduled". */
 private const val SCHEDULED_LOOKAHEAD_SECONDS = 90 * 60L
 
+/** A live event further than this from every timetable call is not matched to one. */
+private const val MAX_SCHEDULE_MATCH_SECONDS = 30 * 60L
+
 /** Small grace window so an arrival doesn't vanish the instant it's technically passed. */
 private const val SCHEDULED_PAST_GRACE_SECONDS = 2 * 60L
 
@@ -179,12 +182,16 @@ class ArrivalsService(
 
     /**
      * The timetable slot a live [event] belongs to: the call nearest its time less its delay.
-     * shortcut: on a loop trip a delay-less event later than half the gap between visits could
-     * match the wrong visit; the feed normally sends delays, so revisit if it ever shows up.
+     * Consumers key on this value, so null beats a guess: null when the nearest call is over
+     * [MAX_SCHEDULE_MATCH_SECONDS] away (stale bundle, retimed trip), or when a delay-less event
+     * on a trip that calls here more than once cannot say which visit it is.
      */
     private fun scheduledFor(tripId: String, stopId: String, event: TripUpdate.StopTimeEvent): Long? {
         val serviceId = staticData.current.trip(tripId)?.serviceId ?: return null
-        return closestScheduledEpoch(tripId, stopId, serviceId, event.time - (if (event.hasDelay()) event.delay else 0))
+        if (!event.hasDelay() && staticData.current.scheduledCallsForTripAtStop(stopId, tripId).size > 1) return null
+        val target = event.time - (if (event.hasDelay()) event.delay else 0)
+        return closestScheduledEpoch(tripId, stopId, serviceId, target)
+            ?.takeIf { kotlin.math.abs(it - target) <= MAX_SCHEDULE_MATCH_SECONDS }
     }
 
     private fun scheduledArrivalsForStop(

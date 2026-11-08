@@ -1,6 +1,7 @@
 package dev.dublinbustracker.server
 
 import com.google.transit.realtime.GtfsRealtime.TripUpdate
+import dev.dublinbustracker.core.Arrival
 import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.StaticDataRef
@@ -859,5 +860,68 @@ class ArrivalsServiceTest {
 
         assertNull(svc.arrivalsForStop("s9").single().scheduledEpochSeconds)
         assertNull(svc.tripStopCalls("t1").single().scheduledEpochSeconds)
+    }
+
+    // --- hardening: a wrong scheduledEpochSeconds is worse than null ---------------
+
+    private fun s1ArrivalAt(offsetSeconds: Int, delaySeconds: Int? = null): Arrival? {
+        val (store, svc) = twoStopService() // t1 is scheduled at s1 exactly at "now"
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1", tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + offsetSeconds, delaySeconds = delaySeconds)),
+                ),
+            ),
+        )
+        return svc.arrivalsForStop("s1").singleOrNull()
+    }
+
+    @Test
+    fun `a nearest timetable call exactly 1800s from the target is accepted`() {
+        assertEquals(wednesdayMorning.toLong(), s1ArrivalAt(1800)!!.scheduledEpochSeconds)
+        assertEquals(wednesdayMorning.toLong(), s1ArrivalAt(1800 + 100, delaySeconds = 100)!!.scheduledEpochSeconds)
+    }
+
+    @Test
+    fun `a nearest timetable call 1801s from the target is null`() {
+        val arrival = s1ArrivalAt(1801)!!
+        assertNull(arrival.scheduledEpochSeconds)
+        assertEquals(wednesdayMorning + 1801L, arrival.expectedEpochSeconds) // expected is untouched
+        assertNull(s1ArrivalAt(1801 + 100, delaySeconds = 100)!!.scheduledEpochSeconds)
+    }
+
+    private fun loopService(delaySeconds: Int?): ArrivalsService = tripCallsWith(
+        listOf(
+            Fixtures.stopTimeUpdate("loop", wednesdayMorning + 480, stopSequence = 2, delaySeconds = delaySeconds),
+            Fixtures.stopTimeUpdate("loop", wednesdayMorning + 1980, stopSequence = 3, delaySeconds = delaySeconds),
+        ),
+        "loop" to 300, "loop" to 1800,
+    )
+
+    @Test
+    fun `a delay-less event on a loop trip is ambiguous so its scheduled time is null`() {
+        val arrivals = loopService(null).arrivalsForStop("loop")
+
+        assertEquals(2, arrivals.size)
+        assertTrue(arrivals.all { it.scheduledEpochSeconds == null })
+        assertTrue(loopService(null).tripStopCalls("t1").all { it.scheduledEpochSeconds == null })
+    }
+
+    @Test
+    fun `a loop trip event with a delay still matches its exact visit`() {
+        val arrivals = loopService(180).arrivalsForStop("loop")
+
+        assertEquals(listOf(wednesdayMorning + 300L, wednesdayMorning + 1800L), arrivals.map { it.scheduledEpochSeconds })
+        assertEquals(
+            listOf(wednesdayMorning + 300L, wednesdayMorning + 1800L),
+            loopService(180).tripStopCalls("t1").map { it.scheduledEpochSeconds },
+        )
+    }
+
+    @Test
+    fun `a delay-less event on a single-visit stop is still matched`() {
+        assertEquals(wednesdayMorning.toLong(), s1ArrivalAt(100)!!.scheduledEpochSeconds)
     }
 }
