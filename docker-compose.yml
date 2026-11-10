@@ -18,6 +18,7 @@ services:
       - gtfs-data:/data
 
   dublin-bus-analytics:
+    profiles: ["analytics"]  # opt in: needs the sibling ../dublin-bus-analytics checkout
     build: ../dublin-bus-analytics
     container_name: dublin-bus-analytics
     restart: unless-stopped
