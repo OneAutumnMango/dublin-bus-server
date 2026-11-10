@@ -18,6 +18,8 @@ cp server.env.example server.env    # fill in GTFSR_API_KEY
 docker compose up -d
 ```
 
+`docker compose up -d --build` also builds and starts the sibling `../dublin-bus-analytics` checkout (UI on `127.0.0.1:8081`; settings via `ANALYTICS_*` variables).
+
 On first start the container downloads the static GTFS feed and filters it into a bundle on
 the `/data` volume. That takes a few minutes and only happens once; afterwards startup is
 seconds. Then:

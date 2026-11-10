@@ -17,5 +17,21 @@ services:
     volumes:
       - gtfs-data:/data
 
+  dublin-bus-analytics:
+    build: ../dublin-bus-analytics
+    container_name: dublin-bus-analytics
+    restart: unless-stopped
+    depends_on: [dublin-bus-server]
+    ports: ["127.0.0.1:${ANALYTICS_PORT:-8081}:8081"]
+    environment:
+      SERVER_URL: http://dublin-bus-server:8080
+      POLL_SECONDS: "${ANALYTICS_POLL_SECONDS:-30}"
+      BACKUP_ENABLED: "${ANALYTICS_BACKUP_ENABLED:-true}"
+      BACKUP_TIME: "${ANALYTICS_BACKUP_TIME:-03:00}"
+      BACKUP_KEEP: "${ANALYTICS_BACKUP_KEEP:-7}"
+      BACKUP_DIR: "${ANALYTICS_BACKUP_DIR:-/data/backups}"
+    volumes: [analytics-data:/data]
+
 volumes:
   gtfs-data:
+  analytics-data:
