@@ -117,4 +117,43 @@ class ArrivalsBenchmarkTest {
         }
         println("BENCH per-stop loop ms: best=${times.min()} worst=${times.max()} all=$times")
     }
+
+    /**
+     * Both numbers from the same JVM and data. Every run uses a fresh [ArrivalsService] (cold: no per-instance state
+     * from an earlier run). The per-stop loop here therefore includes first-touch cost, unlike [benchmarkPerStopLoop],
+     * which warms one stop. The handler timing replicates the route handler body (cache + compute + toResponse) without
+     * a Ktor host or JSON encoding.
+     */
+    @Test
+    fun benchmarkArrivalsForRoute() {
+        assumeTrue(System.getenv("BENCH") == "1", "set BENCH=1 to run")
+        val (ref, store) = syntheticFeed()
+        val stopIds = BenchData.STOP_IDS
+        fun timed(block: () -> Unit): Long {
+            val start = System.nanoTime()
+            block()
+            return (System.nanoTime() - start) / 1_000_000
+        }
+        val loop = (1..3).map {
+            val service = ArrivalsService(store, ref)
+            timed { stopIds.forEach { service.arrivalsForStop(it, BenchData.ROUTE_ID, 50) } }
+        }
+        println("BENCH per-stop loop (cold service) ms: best=${loop.min()} worst=${loop.max()} all=$loop")
+        val route = (1..3).map {
+            val service = ArrivalsService(store, ref)
+            timed { service.arrivalsForRoute(BenchData.ROUTE_ID, stopIds, 50) }
+        }
+        println("BENCH route ms: best=${route.min()} worst=${route.max()} all=$route")
+
+        val service = ArrivalsService(store, ref)
+        val cache = ResponseCache<Map<String, List<ArrivalResponse>>>()
+        fun request() = kotlinx.coroutines.runBlocking {
+            cache.getOrCompute("${BenchData.ROUTE_ID}|50", service.feedStamp(), ref.current) {
+                service.arrivalsForRoute(BenchData.ROUTE_ID, stopIds, 50).mapValues { (_, v) -> v.map { it.toResponse() } }
+            }
+        }
+        val cold = timed { request() }
+        val warm = timed { request() }
+        println("BENCH handler cold/warm ms: $cold/$warm")
+    }
 }
