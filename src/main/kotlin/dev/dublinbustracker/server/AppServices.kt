@@ -16,6 +16,7 @@ class AppServices(
     val vehicles: VehicleService,
     val alerts: AlertsService,
     val staticDataRefresher: StaticDataRefresher,
+    val routeArrivalsCache: ResponseCache<Map<String, List<ArrivalResponse>>> = ResponseCache(),
 ) {
     companion object {
         fun build(

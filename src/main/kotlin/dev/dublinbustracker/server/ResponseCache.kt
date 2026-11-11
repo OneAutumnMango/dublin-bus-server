@@ -22,6 +22,11 @@ class ResponseCache<V : Any>(
         var users = 0
     }
 
+    /** Number of times `compute` has run (test hook). */
+    @Volatile
+    internal var computeCount = 0
+        private set
+
     internal val guard = Mutex()
     // Insertion-ordered: the first entry is the oldest.
     private val entries = LinkedHashMap<String, Entry<V>>()
@@ -52,6 +57,7 @@ class ResponseCache<V : Any>(
                 }
                 val startedAt = nowMs()
                 val value = compute()
+                computeCount++
                 guard.withLock { store(key, Entry(value, feedStamp, staticData, startedAt)) }
                 value
             }

@@ -120,9 +120,10 @@ fun Routing.configureRoutes(services: AppServices) {
             val identifier = call.parameters["route"].orEmpty()
             val route = data.resolveRoutes(identifier).firstOrNull() ?: return@get call.notFound("unknown route")
             val limit = call.limit()
-            val byStop = data.patternsForRoute(route.id).values.flatten().distinct().mapNotNull { stopId ->
-                services.arrivals.arrivalsForStop(stopId, identifier, limit).takeIf { it.isNotEmpty() }?.let { stopId to it.map { a -> a.toResponse() } }
-            }.toMap()
+            val stopIds = data.patternsForRoute(route.id).values.flatten().distinct()
+            val byStop = services.routeArrivalsCache.getOrCompute("$identifier|$limit", services.arrivals.feedStamp(), data) {
+                services.arrivals.arrivalsForRoute(identifier, stopIds, limit).mapValues { (_, v) -> v.map { it.toResponse() } }
+            }
             call.respond(byStop)
         }
 

@@ -205,6 +205,52 @@ class RoutesTest {
         assertEquals(HttpStatusCode.NotFound, client.get("/v1/routes/nope/arrivals").status)
     }
 
+    private fun twoTripFeed(now: Long, shift: Long) = Fixtures.feedOf(
+        Fixtures.tripUpdateEntity(
+            entityId = "e1", tripId = "t1", vehicleId = "bus-1",
+            stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", now + 300 + shift, stopSequence = 1)),
+        ),
+        Fixtures.tripUpdateEntity(
+            entityId = "e3", tripId = "t3", vehicleId = "bus-3",
+            stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", now + 500 + shift, stopSequence = 1)),
+        ),
+    )
+
+    @Test
+    fun `route arrivals identical on repeat requests within a snapshot`() = testApplication {
+        val services = services()
+        application { configureServer(services) }
+        val first = client.get("/v1/routes/15/arrivals").bodyAsText()
+        val second = client.get("/v1/routes/15/arrivals").bodyAsText()
+        assertEquals(first, second)
+        assertEquals(1, services.routeArrivalsCache.computeCount)
+    }
+
+    @Test
+    fun `route arrivals recomputed after a new snapshot is recorded`() = testApplication {
+        val services = services()
+        application { configureServer(services) }
+        val now = System.currentTimeMillis() / 1000
+        val before = client.get("/v1/routes/15/arrivals").bodyAsText()
+        services.store.record(FeedKind.TRIP_UPDATES, twoTripFeed(now, 0), System.currentTimeMillis() + 1_000)
+        val after = client.get("/v1/routes/15/arrivals").bodyAsText()
+        assertEquals(2, services.routeArrivalsCache.computeCount)
+        assertTrue(before != after)
+        assertTrue("bus-3" in after)
+    }
+
+    @Test
+    fun `route arrivals cache key includes the limit`() = testApplication {
+        val services = services()
+        application { configureServer(services) }
+        services.store.record(FeedKind.TRIP_UPDATES, twoTripFeed(System.currentTimeMillis() / 1000, 0), System.currentTimeMillis() + 1_000)
+        val one = json.decodeFromString<Map<String, List<ArrivalResponse>>>(client.get("/v1/routes/15/arrivals?limit=1").bodyAsText())
+        val two = json.decodeFromString<Map<String, List<ArrivalResponse>>>(client.get("/v1/routes/15/arrivals?limit=2").bodyAsText())
+        assertEquals(1, one.getValue("s1").size)
+        assertEquals(2, two.getValue("s1").size)
+        assertEquals(2, services.routeArrivalsCache.computeCount)
+    }
+
     @Test
     fun `arrivals for an unknown stop are a 404`() = testApplication {
         startServer()
