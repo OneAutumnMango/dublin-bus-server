@@ -1,7 +1,9 @@
 package dev.dublinbustracker.server
 
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Small TTL cache with single-flight computation. An entry is valid while its feed stamp is unchanged, its
@@ -20,12 +22,18 @@ class ResponseCache<V : Any>(
         var users = 0
     }
 
-    private val guard = Mutex()
+    internal val guard = Mutex()
     // Insertion-ordered: the first entry is the oldest.
     private val entries = LinkedHashMap<String, Entry<V>>()
     private val locks = HashMap<String, KeyLock>()
 
     internal suspend fun size(): Int = guard.withLock { entries.size }
+
+    /** Number of per-key locks currently registered (test hook). */
+    internal suspend fun lockCount(): Int = guard.withLock { locks.size }
+
+    /** Total callers registered on per-key locks (test hook). */
+    internal suspend fun lockUsers(): Int = guard.withLock { locks.values.sumOf { it.users } }
 
     suspend fun getOrCompute(key: String, feedStamp: List<Long?>, staticData: Any, compute: () -> V): V {
         val keyLock =
@@ -48,8 +56,11 @@ class ResponseCache<V : Any>(
                 value
             }
         } finally {
-            guard.withLock {
-                if (--keyLock.users == 0) locks.remove(key)
+            // Must run even when this coroutine is cancelled, or the per-key lock leaks.
+            withContext(NonCancellable) {
+                guard.withLock {
+                    if (--keyLock.users == 0) locks.remove(key)
+                }
             }
         }
     }

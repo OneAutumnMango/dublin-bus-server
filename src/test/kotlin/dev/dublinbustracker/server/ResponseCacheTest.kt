@@ -6,7 +6,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CountDownLatch
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 
@@ -71,20 +74,46 @@ class ResponseCacheTest {
     fun `concurrent callers for one key compute once`() = runBlocking {
         val c = cache()
         val calls = AtomicInteger()
-        val results =
-            (1..10)
-                .map {
-                    async(Dispatchers.Default) {
-                        c.getOrCompute("k", listOf(1L), static) {
-                            calls.incrementAndGet()
-                            Thread.sleep(200)
-                            "value"
-                        }
+        val release = CountDownLatch(1)
+        val jobs =
+            (1..10).map {
+                async(Dispatchers.Default) {
+                    c.getOrCompute("k", listOf(1L), static) {
+                        calls.incrementAndGet()
+                        release.await()
+                        "value"
                     }
                 }
-                .awaitAll()
+            }
+        // Wait until all callers have entered (queued on the key lock), or a second compute has started.
+        withTimeout(5_000) {
+            while (c.lockUsers() < 10 && calls.get() < 2) delay(5)
+        }
+        release.countDown()
+        val results = jobs.awaitAll()
         assertEquals(1, calls.get())
         assertEquals(List(10) { "value" }, results)
+    }
+
+    @Test
+    fun `cancelled waiter does not leak the per-key lock`() = runBlocking {
+        val c = cache()
+        val release = CountDownLatch(1)
+        val first = async(Dispatchers.Default) { c.getOrCompute("k", listOf(1L), static) { release.await(); "v1" } }
+        val waiter = async(Dispatchers.Default) { c.getOrCompute("k", listOf(1L), static) { "never" } }
+        withTimeout(5_000) { while (c.lockUsers() < 2) delay(5) }
+
+        // Hold the guard so the waiter's cleanup contends on it while it is cancelled.
+        c.guard.lock()
+        waiter.cancel()
+        delay(100)
+        c.guard.unlock()
+        release.countDown()
+
+        assertEquals("v1", first.await())
+        waiter.join()
+        assertEquals(0, c.lockCount())
+        assertEquals("v1", c.getOrCompute("k", listOf(1L), static) { "v2" })
     }
 
     @Test
