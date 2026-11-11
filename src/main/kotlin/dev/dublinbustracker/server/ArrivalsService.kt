@@ -62,12 +62,44 @@ class ArrivalsService(
     private fun feeds(): List<FeedMessage> =
         listOfNotNull(store.latest(FeedKind.TRIP_UPDATES), store.latest(FeedKind.COMBINED)).map { it.feed }
 
+    private fun allTripUpdates(): List<TripUpdate> =
+        feeds().asSequence().flatMap { it.entityList.asSequence() }
+            .filter { it.hasTripUpdate() }.map { it.tripUpdate }.toList()
+
     fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50): List<Arrival> {
         val now = nowEpochSeconds()
         val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
-        val allUpdates = feeds().asSequence().flatMap { it.entityList.asSequence() }
-            .filter { it.hasTripUpdate() }.map { it.tripUpdate }.toList()
+        return arrivalsAtStop(stopId, now, wantedRouteIds, allTripUpdates(), limit)
+    }
 
+    /**
+     * Arrivals at each of [stopIds] for one route, same per-stop result as [arrivalsForStop] with
+     * a route filter. The feed is narrowed to the route's trips once rather than once per stop.
+     * Stops with no arrivals are omitted; order follows [stopIds].
+     */
+    fun arrivalsForRoute(routeIdentifier: String, stopIds: Collection<String>, limit: Int = 50): Map<String, List<Arrival>> {
+        val static = staticData.current
+        val wantedRouteIds = static.resolveRoutes(routeIdentifier).map { it.id }.toSet()
+        if (wantedRouteIds.isEmpty()) return emptyMap()
+        val now = nowEpochSeconds()
+        // A trip belongs to the route by the same rule arrivalsFrom applies: static route first,
+        // the feed's own route id when the trip is unknown to the static data.
+        val routeUpdates = allTripUpdates().filter { (static.trip(it.trip.tripId)?.routeId ?: it.trip.routeId) in wantedRouteIds }
+        val result = LinkedHashMap<String, List<Arrival>>()
+        for (stopId in stopIds) {
+            val arrivals = arrivalsAtStop(stopId, now, wantedRouteIds, routeUpdates, limit)
+            if (arrivals.isNotEmpty()) result[stopId] = arrivals
+        }
+        return result
+    }
+
+    private fun arrivalsAtStop(
+        stopId: String,
+        now: Long,
+        wantedRouteIds: Set<String>?,
+        allUpdates: List<TripUpdate>,
+        limit: Int,
+    ): List<Arrival> {
         // A cancelled trip, or one that skips this very stop, must show nowhere - not even as a
         // cascaded estimate or a "(scheduled)" fallback from the static timetable.
         val suppressedTripIds = allUpdates.asSequence()

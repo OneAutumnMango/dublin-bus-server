@@ -980,4 +980,93 @@ class ArrivalsServiceTest {
 
         assertEquals(now + 300, svc.arrivalsForStop("s1").single().scheduledEpochSeconds)
     }
+
+    // --- arrivalsForRoute must equal the per-stop reference ---------------------
+
+    private fun routeBundle(): String =
+        """{"version":3,
+           |"stops":[{"id":"a","code":"1","name":"A","lat":53.0,"lon":-6.0},{"id":"b","code":"2","name":"B","lat":53.0,"lon":-6.0},
+           |  {"id":"c","code":"3","name":"C","lat":53.0,"lon":-6.0},{"id":"loop","code":"4","name":"Loop","lat":53.0,"lon":-6.0}],
+           |"routes":[{"id":"r1","shortName":"15","longName":"","agencyId":"a1"},{"id":"r2","shortName":"27","longName":"","agencyId":"a1"}],
+           |"trips":{
+           |  "tLive":{"routeId":"r1","headsign":"Live","directionId":"0","shapeId":"","serviceId":"svc"},
+           |  "tCancel":{"routeId":"r1","headsign":"Cancel","directionId":"0","shapeId":"","serviceId":"svc"},
+           |  "tSkip":{"routeId":"r1","headsign":"Skip","directionId":"0","shapeId":"","serviceId":"svc"},
+           |  "tLoop":{"routeId":"r1","headsign":"Loop","directionId":"0","shapeId":"","serviceId":"svc"},
+           |  "tSched":{"routeId":"r1","headsign":"Sched","directionId":"0","shapeId":"","serviceId":"svc"},
+           |  "tOther":{"routeId":"r2","headsign":"Other","directionId":"0","shapeId":"","serviceId":"svc"}},
+           |"services":{"svc":{"weekdays":"1111111","start":"20240101","end":"20241231"}},
+           |"routePatterns":{"r1":{"0":["a","b","loop","c"],"1":["c","loop","b","a"]}},
+           |"stopSchedule":{
+           |  "a":[{"t":"tLive","s":${secondsSinceDublinMidnight}},{"t":"tCancel","s":${secondsSinceDublinMidnight + 60}},
+           |       {"t":"tSkip","s":${secondsSinceDublinMidnight}},{"t":"tLoop","s":${secondsSinceDublinMidnight}},
+           |       {"t":"tOther","s":${secondsSinceDublinMidnight + 120}}],
+           |  "b":[{"t":"tLive","s":${secondsSinceDublinMidnight + 300}},{"t":"tCancel","s":${secondsSinceDublinMidnight + 360}},
+           |       {"t":"tSkip","s":${secondsSinceDublinMidnight + 300}},{"t":"tOther","s":${secondsSinceDublinMidnight + 420}}],
+           |  "loop":[{"t":"tLive","s":${secondsSinceDublinMidnight + 600}},{"t":"tLoop","s":${secondsSinceDublinMidnight + 300}},
+           |          {"t":"tLoop","s":${secondsSinceDublinMidnight + 1800}}],
+           |  "c":[{"t":"tLive","s":${secondsSinceDublinMidnight + 900}},{"t":"tSched","s":${secondsSinceDublinMidnight + 600}},
+           |       {"t":"tOther","s":${secondsSinceDublinMidnight + 900}}]
+           |}}
+        """.trimMargin()
+
+    @Test
+    fun `arrivalsForRoute equals per-stop arrivalsForStop`() {
+        val store = FeedStore(historyDepth = 5)
+        val data = StaticDataRef(GtfsStaticData.parse(routeBundle()))
+        val svc = ArrivalsService(store, data, nowEpochSeconds = { wednesdayMorning })
+        val t = wednesdayMorning
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                // (a) live with a delay; cascades to later stops
+                Fixtures.tripUpdateEntity("e1", "tLive", vehicleId = "v1", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("a", t + 90, stopSequence = 1, delaySeconds = 90))),
+                // (b) cancelled
+                Fixtures.tripUpdateEntity("e2", "tCancel", cancelled = true),
+                // (c) one skipped stop
+                Fixtures.tripUpdateEntity("e3", "tSkip", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("a", t + 30, stopSequence = 1, delaySeconds = 30),
+                    Fixtures.stopTimeUpdate("b", t + 330, stopSequence = 2, relationship = skipped))),
+                // (d) loop trip calling "loop" twice
+                Fixtures.tripUpdateEntity("e4", "tLoop", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("loop", t + 480, stopSequence = 2, delaySeconds = 180),
+                    Fixtures.stopTimeUpdate("loop", t + 1980, stopSequence = 3, delaySeconds = 180))),
+                // (e) no static entry, route known only from the feed
+                Fixtures.tripUpdateEntity("e5", "tNoStatic", routeId = "r1", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("b", t + 200, stopSequence = 1),
+                    Fixtures.stopTimeUpdate("c", t + 700, stopSequence = 2))),
+                // (g) other routes: one static, one unknown to static but tagged r2 in the feed
+                Fixtures.tripUpdateEntity("e6", "tOther", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("a", t + 150, stopSequence = 1, delaySeconds = 30),
+                    Fixtures.stopTimeUpdate("b", t + 450, stopSequence = 2))),
+                Fixtures.tripUpdateEntity("e7", "tOtherNoStatic", routeId = "r2", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("a", t + 100, stopSequence = 1))),
+            ),
+        )
+        // (f) tSched has no update at all: only the static timetable at "c" shows it.
+
+        val stops = data.current.patternsForRoute("r1").values.flatten().distinct()
+        assertEquals(setOf("a", "b", "c", "loop"), stops.toSet())
+        for (identifier in listOf("r1", "15")) {
+            for (limit in listOf(1, 50)) {
+                val expected = stops.mapNotNull { s -> svc.arrivalsForStop(s, identifier, limit).takeIf { it.isNotEmpty() }?.let { s to it } }.toMap()
+                val actual = svc.arrivalsForRoute(identifier, stops, limit)
+                assertEquals(expected, actual, "identifier=$identifier limit=$limit")
+                assertEquals(expected.keys.toList(), actual.keys.toList())
+            }
+        }
+        val full = svc.arrivalsForRoute("r1", stops, 50)
+        assertTrue(full.values.flatten().any { it.tripId == "tNoStatic" }, "feed-routeId trip must be included")
+        assertTrue(full.values.flatten().any { it.tripId == "tSched" && !it.isRealtime })
+        assertTrue(full.values.flatten().none { it.tripId in setOf("tCancel", "tOther", "tOtherNoStatic") })
+        assertEquals(2, full.getValue("loop").count { it.tripId == "tLoop" })
+    }
+
+    @Test
+    fun `arrivalsForRoute is empty for an unknown route`() {
+        recordTripUpdates()
+
+        assertEquals(emptyMap(), service.arrivalsForRoute("999", listOf("s1", "s2")))
+    }
 }
