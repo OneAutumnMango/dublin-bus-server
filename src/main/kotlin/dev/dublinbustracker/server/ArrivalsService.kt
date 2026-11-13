@@ -58,6 +58,8 @@ class ArrivalsService(
     private val store: FeedStore,
     private val staticData: StaticDataRef,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
+    // Production wiring (AppServices) must pass the shared VehicleService so the fix index is
+    // built once; this default only suits tests.
     private val vehicles: VehicleService = VehicleService(store, staticData),
 ) {
     private fun feeds(): List<FeedMessage> =
@@ -292,7 +294,7 @@ class ArrivalsService(
         val routeId = trip?.routeId ?: update.trip.routeId
         if (wantedRouteIds != null && routeId !in wantedRouteIds) return emptySequence()
         // Lazy: only trips that actually call this stop pay for it (route arrivals loops every stop).
-        val started by lazy { (update.firstReport(now)?.stopSequence ?: 0) > 1 }
+        val started by lazy(LazyThreadSafetyMode.NONE) { (update.firstReport(now)?.stopSequence ?: 0) > 1 }
 
         return update.stopTimeUpdateList.asSequence()
             .filter { it.stopId == stopId }

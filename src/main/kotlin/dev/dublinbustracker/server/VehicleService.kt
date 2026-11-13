@@ -85,7 +85,10 @@ class VehicleService(
         val index = fixIndex?.takeIf { it.vehicles === vehicles && it.combined === combined }
             ?: FixIndex(
                 vehicles, combined,
-                latestEntities().filter { it.vehicle.hasPosition() && it.vehicle.trip.tripId.isNotEmpty() }
+                // Raw entities, not latestEntities(): distinctBy vehicle id would let a stale or
+                // position-less entry hide a fresher one, and collapse blank-id vehicles.
+                listOfNotNull(vehicles, combined).flatMap { it.feed.entityList }
+                    .filter { it.hasVehicle() && it.vehicle.hasPosition() && it.vehicle.trip.tripId.isNotEmpty() }
                     .groupBy({ it.vehicle.trip.tripId }, { it.vehicle.timestamp })
                     .mapValues { (_, timestamps) -> timestamps.max() },
             ).also { fixIndex = it; fixIndexBuilds++ }

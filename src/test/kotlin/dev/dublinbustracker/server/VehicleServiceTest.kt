@@ -112,6 +112,35 @@ class VehicleServiceTest {
     }
 
     @Test
+    fun `a position-less vehicles entry does not hide a fresh combined fix for the same vehicle`() {
+        val noPosition = Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 990)
+            .toBuilder().apply { vehicleBuilder.clearPosition() }.build()
+        recordFixes(noPosition)
+        store.record(FeedKind.COMBINED, Fixtures.feedOf(Fixtures.vehicleEntity("e2", "bus-1", "t1", 53.0, -6.0, 990)))
+
+        assertTrue(service.hasFreshFix("t1", now = 1_000))
+    }
+
+    @Test
+    fun `an older vehicles entry does not hide a fresher combined fix for the same vehicle`() {
+        recordFixes(Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 100))
+        store.record(FeedKind.COMBINED, Fixtures.feedOf(Fixtures.vehicleEntity("e2", "bus-1", "t1", 53.0, -6.0, 990)))
+
+        assertTrue(service.hasFreshFix("t1", now = 1_000))
+    }
+
+    @Test
+    fun `vehicles with blank ids on different trips each count`() {
+        recordFixes(
+            Fixtures.vehicleEntity("e1", "", "t1", 53.0, -6.0, 990),
+            Fixtures.vehicleEntity("e2", "", "t2", 53.0, -6.0, 990),
+        )
+
+        assertTrue(service.hasFreshFix("t1", now = 1_000))
+        assertTrue(service.hasFreshFix("t2", now = 1_000))
+    }
+
+    @Test
     fun `a fix is fresh under 180 seconds old and stale at exactly 180`() {
         recordFixes(Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 821))
         assertTrue(service.hasFreshFix("t1", now = 1_000))

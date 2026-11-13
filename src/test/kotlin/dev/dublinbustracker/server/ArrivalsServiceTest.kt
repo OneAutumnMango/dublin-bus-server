@@ -488,6 +488,44 @@ class ArrivalsServiceTest {
         assertEquals(13, arrival.dueMinutes)
     }
 
+    private fun twoStopFeed(store: FeedStore, reportedSequence: Int) = store.record(
+        FeedKind.TRIP_UPDATES,
+        Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(
+            Fixtures.stopTimeUpdate("s1", wednesdayMorning + 180, stopSequence = reportedSequence, delaySeconds = 180),
+            Fixtures.stopTimeUpdate("s2", wednesdayMorning + 780, stopSequence = reportedSequence + 1, delaySeconds = 180),
+        ))),
+    )
+
+    @Test
+    fun `started agrees between the route-wide and per-stop paths`() {
+        for ((sequence, expected) in listOf(2 to true, 1 to false)) {
+            val (store, svc) = twoStopService()
+            twoStopFeed(store, sequence)
+
+            val perStop = svc.arrivalsForStop("s2").single().started
+            val routeWide = svc.arrivalsForRoute("15", listOf("s2")).getValue("s2").single().started
+
+            assertEquals(expected, perStop, "per-stop, sequence=$sequence")
+            assertEquals(perStop, routeWide, "route-wide, sequence=$sequence")
+        }
+    }
+
+    @Test
+    fun `a cascaded arrival is started only when the reported stop is past sequence 1`() {
+        for ((sequence, expected) in listOf(2 to true, 1 to false)) {
+            val (store, svc) = twoStopService()
+            // Only s1 is in the feed, so s2 is cascaded from the schedule.
+            store.record(
+                FeedKind.TRIP_UPDATES,
+                Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("s1", wednesdayMorning + 180, stopSequence = sequence, delaySeconds = 180),
+                ))),
+            )
+
+            assertEquals(expected, svc.arrivalsForStop("s2").single().started, "sequence=$sequence")
+        }
+    }
+
     @Test
     fun `hasGps is set on a cascaded arrival too`() {
         val (store, svc) = twoStopService()
