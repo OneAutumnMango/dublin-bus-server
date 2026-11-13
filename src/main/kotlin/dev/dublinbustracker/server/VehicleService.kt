@@ -85,11 +85,12 @@ class VehicleService(
         val index = fixIndex?.takeIf { it.vehicles === vehicles && it.combined === combined }
             ?: FixIndex(
                 vehicles, combined,
-                latestEntities().filter { it.vehicle.trip.tripId.isNotEmpty() }
-                    .associate { it.vehicle.trip.tripId to it.vehicle.timestamp },
+                latestEntities().filter { it.vehicle.hasPosition() && it.vehicle.trip.tripId.isNotEmpty() }
+                    .groupBy({ it.vehicle.trip.tripId }, { it.vehicle.timestamp })
+                    .mapValues { (_, timestamps) -> timestamps.max() },
             ).also { fixIndex = it; fixIndexBuilds++ }
         val timestamp = index.latestByTrip[tripId] ?: return false
-        return timestamp >= now - FRESH_FIX_SECONDS
+        return timestamp > 0 && timestamp > now - FRESH_FIX_SECONDS
     }
 
     private fun headingOn(shapeId: String, here: LatLon): Float? =

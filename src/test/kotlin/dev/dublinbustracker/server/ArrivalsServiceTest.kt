@@ -127,7 +127,16 @@ class ArrivalsServiceTest {
 
     @Test
     fun `scheduled-only arrivals never have gps`() {
-        val svc = scheduledService(bundleWithSchedule("1111111", secondsSinceDublinMidnight + 10 * 60))
+        val vehicleStore = FeedStore(historyDepth = 5)
+        vehicleStore.record(
+            FeedKind.VEHICLES,
+            Fixtures.feedOf(Fixtures.vehicleEntity("v1", "bus-1", "t1", 53.34, -6.25, wednesdayMorning - 10)),
+        )
+        val svc = ArrivalsService(
+            vehicleStore,
+            StaticDataRef(GtfsStaticData.parse(bundleWithSchedule("1111111", secondsSinceDublinMidnight + 10 * 60))),
+            nowEpochSeconds = { wednesdayMorning },
+        )
 
         assertFalse(svc.arrivalsForStop("s1").single().hasGps)
     }
@@ -453,6 +462,25 @@ class ArrivalsServiceTest {
         assertEquals(180, arrival.delaySeconds)
         // s2 is scheduled 10 min after s1, plus the 3 min delay reported at s1.
         assertEquals(13, arrival.dueMinutes)
+    }
+
+    @Test
+    fun `hasGps is set on a cascaded arrival too`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(
+                    Fixtures.stopTimeUpdate("s1", wednesdayMorning + 180, delaySeconds = 180),
+                )),
+            ),
+        )
+        store.record(
+            FeedKind.VEHICLES,
+            Fixtures.feedOf(Fixtures.vehicleEntity("v1", "bus-1", "t1", 53.34, -6.25, wednesdayMorning - 10)),
+        )
+
+        assertTrue(svc.arrivalsForStop("s2").single().hasGps)
     }
 
     @Test

@@ -7,6 +7,7 @@ import dev.dublinbustracker.data.StaticDataRef
 import dev.dublinbustracker.support.Fixtures
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -86,6 +87,47 @@ class VehicleServiceTest {
         recordVehicles()
         service.hasFreshFix("t1", now = 1_100)
         assertEquals(2, service.fixIndexBuilds)
+    }
+
+    private fun recordFixes(vararg entities: com.google.transit.realtime.GtfsRealtime.FeedEntity) =
+        store.record(FeedKind.VEHICLES, Fixtures.feedOf(*entities))
+
+    @Test
+    fun `the freshest fix wins when several vehicles report the same trip`() {
+        recordFixes(
+            Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 990),
+            Fixtures.vehicleEntity("e2", "bus-2", "t1", 53.0, -6.0, 100),
+        )
+
+        assertTrue(service.hasFreshFix("t1", now = 1_000))
+    }
+
+    @Test
+    fun `a report without a position does not count as gps`() {
+        val noPosition = Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 990)
+            .toBuilder().apply { vehicleBuilder.clearPosition() }.build()
+        recordFixes(noPosition)
+
+        assertFalse(service.hasFreshFix("t1", now = 1_000))
+    }
+
+    @Test
+    fun `a fix is fresh under 180 seconds old and stale at exactly 180`() {
+        recordFixes(Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 821))
+        assertTrue(service.hasFreshFix("t1", now = 1_000))
+        recordFixes(Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 820))
+        assertFalse(service.hasFreshFix("t1", now = 1_000))
+        recordFixes(Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 0))
+        assertFalse(service.hasFreshFix("t1", now = 100))
+    }
+
+    @Test
+    fun `a different now on the same snapshot does not rebuild the index`() {
+        recordFixes(Fixtures.vehicleEntity("e1", "bus-1", "t1", 53.0, -6.0, 1_000))
+
+        assertTrue(service.hasFreshFix("t1", now = 1_010))
+        assertFalse(service.hasFreshFix("t1", now = 1_500))
+        assertEquals(1, service.fixIndexBuilds)
     }
 
     @Test
