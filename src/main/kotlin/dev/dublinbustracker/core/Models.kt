@@ -42,6 +42,8 @@ data class Arrival(
     val possiblyPassed: Boolean = false,
     /** The timetable time of this call, with no live delay applied; null when no timetable call matches. */
     val scheduledEpochSeconds: Long? = null,
+    /** A live trip whose feed report has moved past stop sequence 1; false for timetable-only. */
+    val started: Boolean = false,
 )
 
 /** Where a bus is right now, from the Vehicles feed. */

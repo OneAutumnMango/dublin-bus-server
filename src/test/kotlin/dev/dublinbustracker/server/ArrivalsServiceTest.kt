@@ -55,6 +55,45 @@ class ArrivalsServiceTest {
         assertTrue(arrivals.all { it.isRealtime })
     }
 
+    private fun startedFor(vararg updates: TripUpdate.StopTimeUpdate): Boolean {
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = updates.toList())),
+        )
+        return service.arrivalsForStop("s2").single().started
+    }
+
+    @Test
+    fun `started is false while the report is still at stop sequence 1`() {
+        assertFalse(startedFor(
+            Fixtures.stopTimeUpdate("s1", epochSeconds = 1_060, stopSequence = 1),
+            Fixtures.stopTimeUpdate("s2", epochSeconds = 1_500, stopSequence = 2),
+        ))
+    }
+
+    @Test
+    fun `started is true once the report has moved past stop sequence 1`() {
+        assertTrue(startedFor(
+            Fixtures.stopTimeUpdate("s1", epochSeconds = 700, stopSequence = 1),
+            Fixtures.stopTimeUpdate("s2", epochSeconds = 1_060, stopSequence = 2),
+        ))
+    }
+
+    @Test
+    fun `started stays false when the feed gives no stop sequence`() {
+        assertFalse(startedFor(
+            Fixtures.stopTimeUpdate("s1", epochSeconds = 1_060),
+            Fixtures.stopTimeUpdate("s2", epochSeconds = 1_500),
+        ))
+    }
+
+    @Test
+    fun `scheduled-only arrivals are not started`() {
+        val svc = scheduledService(bundleWithSchedule("1111111", secondsSinceDublinMidnight + 10 * 60))
+
+        assertFalse(svc.arrivalsForStop("s1").single().started)
+    }
+
     @Test
     fun `arrival carries trip, vehicle and delay details`() {
         recordTripUpdates()

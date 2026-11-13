@@ -154,7 +154,7 @@ class ArrivalsService(
         val trip = staticData.current.trip(tripId) ?: return emptyList()
         if (wantedRouteIds != null && trip.routeId !in wantedRouteIds) return emptyList()
 
-        val (reportedStopId, reportedEvent) = update.firstReport(now) ?: return emptyList()
+        val (reportedStopId, reportedEvent, reportedSequence) = update.firstReport(now) ?: return emptyList()
 
         val explicitDelay = reportedEvent.takeIf { it.hasDelay() }?.delay
         val reportedScheduled = closestScheduledEpoch(
@@ -193,6 +193,7 @@ class ArrivalsService(
                     vehicleId = update.vehicle.id.orNullIfBlank(),
                     possiblyPassed = epoch < now - SCHEDULED_PAST_GRACE_SECONDS,
                     scheduledEpochSeconds = scheduled,
+                    started = reportedSequence > 1,
                 )
             }
     }
@@ -282,6 +283,7 @@ class ArrivalsService(
         val trip = staticData.current.trip(update.trip.tripId)
         val routeId = trip?.routeId ?: update.trip.routeId
         if (wantedRouteIds != null && routeId !in wantedRouteIds) return emptySequence()
+        val started = (update.firstReport(now)?.stopSequence ?: 0) > 1
 
         return update.stopTimeUpdateList.asSequence()
             .filter { it.stopId == stopId }
@@ -303,6 +305,7 @@ class ArrivalsService(
                     vehicleId = update.vehicle.id.orNullIfBlank(),
                     possiblyPassed = event.time < now - SCHEDULED_PAST_GRACE_SECONDS,
                     scheduledEpochSeconds = scheduledFor(update.trip.tripId, stopTimeUpdate, event),
+                    started = started,
                 )
             }
     }
@@ -331,15 +334,18 @@ class ArrivalsService(
         }.sortedBy { it.stopSequence }
     }
 
+    /** The stop update a trip is currently reported at; [stopSequence] is 0 when the feed gives none. */
+    private data class Report(val stopId: String, val event: TripUpdate.StopTimeEvent, val stopSequence: Int)
+
     /**
      * Where the bus currently is: the first stop it hasn't passed yet. The feed also keeps the
      * stops already passed, whose delays are stale, so those are skipped - unless every stop is
      * behind it, when the last one is the best there is.
      */
-    private fun TripUpdate.firstReport(now: Long): Pair<String, TripUpdate.StopTimeEvent>? {
+    private fun TripUpdate.firstReport(now: Long): Report? {
         val reports = stopTimeUpdateList.asSequence()
-            .mapNotNull { stu -> stu.event(trip.tripId, now)?.let { stu.stopId to it } }
-        return reports.firstOrNull { it.second.time >= now - SCHEDULED_PAST_GRACE_SECONDS } ?: reports.lastOrNull()
+            .mapNotNull { stu -> stu.event(trip.tripId, now)?.let { Report(stu.stopId, it, stu.stopSequence) } }
+        return reports.firstOrNull { it.event.time >= now - SCHEDULED_PAST_GRACE_SECONDS } ?: reports.lastOrNull()
     }
 
     /**
