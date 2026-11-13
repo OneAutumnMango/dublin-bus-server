@@ -38,15 +38,15 @@
 **Security flag:** `none`
 **Does NOT cover:** buses late to leave their terminus (still marked started once the feed moves past stop 1); distance from the terminus.
 
-- [ ] **Step 1: Write failing tests** in `ArrivalsServiceTest.kt`, using that file's existing helpers to build a trip update:
+- [x] **Step 1: Write failing tests** in `ArrivalsServiceTest.kt`, using that file's existing helpers to build a trip update:
   - `started is false while the report is still at stop sequence 1`: first stop-time update (`stop_sequence = 1`) time is now+60 s → arrival at a later stop has `started == false`.
   - `started is true once the report has moved past stop sequence 1`: update for seq 1 has time now-300 s, seq 2 has now+60 s → `started == true`.
   - `started stays false when the feed gives no stop sequence`: all updates `stop_sequence` unset → `started == false`.
   - `scheduled-only arrivals are not started`: arrival with `isRealtime = false` → `started == false`.
-- [ ] **Step 2: Run** `./gradlew test --tests '*ArrivalsServiceTest*'` → FAIL (no `started`).
-- [ ] **Step 3: Implement.** Make `firstReport(now)` also return the chosen `StopTimeUpdate`'s `stopSequence` (a small result type, not a Triple); set `started = reportedSequence > 1` on live arrivals in both builders (the one at ~line 187 and ~line 297); add the field to `Arrival`, `ArrivalResponse` and `toResponse()`.
-- [ ] **Step 4: Run** the same command → PASS; then `./gradlew test` → all PASS.
-- [ ] **Step 5: Commit** on branch `feat/arrival-gps-started`: `git add -A && git commit -m "Report whether a live arrival's trip has started its journey"` (end with the attribution line from the session).
+- [x] **Step 2: Run** `./gradlew test --tests '*ArrivalsServiceTest*'` → FAIL (no `started`).
+- [x] **Step 3: Implement.** Make `firstReport(now)` also return the chosen `StopTimeUpdate`'s `stopSequence` (a small result type, not a Triple); set `started = reportedSequence > 1` on live arrivals in both builders (the one at ~line 187 and ~line 297); add the field to `Arrival`, `ArrivalResponse` and `toResponse()`.
+- [x] **Step 4: Run** the same command → PASS; then `./gradlew test` → all PASS.
+- [x] **Step 5: Commit** on branch `feat/arrival-gps-started`: `git add -A && git commit -m "Report whether a live arrival's trip has started its journey"` (end with the attribution line from the session).
 
 ### Task 2: Server — `hasGps` flag
 
@@ -61,16 +61,16 @@
 **Security flag:** `none`
 **Does NOT cover:** whether the position is near the stop or terminus; a fix older than 180 s counts as no GPS.
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - `hasGps is true when the vehicle feed has a fresh fix for the trip` (fix timestamp now-30 s).
   - `hasGps is false for a fix older than three minutes` (now-600 s).
   - `hasGps is false when no vehicle reports the trip`.
   - `scheduled-only arrivals never have gps`.
   - `the fresh-trip set is built once per snapshot`: call twice on the same snapshot, assert the underlying feed entities are scanned once (use the test's fake/counting store as `ResponseCache` tests do).
-- [ ] **Step 2: Run** `./gradlew test --tests '*VehicleServiceTest*' --tests '*ArrivalsServiceTest*'` → FAIL.
-- [ ] **Step 3: Implement** the cached set in `VehicleService` and set `hasGps = tripId in fresh` on live arrivals only; add to DTO and `toResponse()`.
-- [ ] **Step 4: Run** the same command then `./gradlew test` (includes `ArrivalsBenchmarkTest`) → PASS, benchmark not slower than the committed "after" figure by more than noise.
-- [ ] **Step 5: Commit**: `git commit -m "Report whether a live arrival's bus has a fresh GPS fix"`.
+- [x] **Step 2: Run** `./gradlew test --tests '*VehicleServiceTest*' --tests '*ArrivalsServiceTest*'` → FAIL.
+- [x] **Step 3: Implement** the cached set in `VehicleService` and set `hasGps = tripId in fresh` on live arrivals only; add to DTO and `toResponse()`.
+- [x] **Step 4: Run** the same command then `./gradlew test` (includes `ArrivalsBenchmarkTest`) → PASS, benchmark not slower than the committed "after" figure by more than noise.
+- [x] **Step 5: Commit**: `git commit -m "Report whether a live arrival's bus has a fresh GPS fix"`.
 
 ### Task 3: App — model and parsing
 
@@ -104,11 +104,11 @@
 **Security flag:** `none`
 **Does NOT cover:** icons on the widget, map, or bus info sheet.
 
-- [ ] **Step 1: Write failing tests:** `display carries hasGps and started` (live arrival with both true → both true on the `ArrivalDisplay`); `a timetable-only arrival shows neither` (isRealtime false, flags false → both false and `detailLine` unchanged from today).
-- [ ] **Step 2: Run** `./gradlew :core:test --tests '*ArrivalDisplayTest*'` → FAIL.
-- [ ] **Step 3: Implement** the two fields on `ArrivalDisplay`, copied in `Arrival.display`; in the row composable draw a small GPS icon (`Icons.Filled.GpsFixed`, if not in the icon set used, use `LocationOn`) when `hasGps` and a small forward-arrow icon (`Icons.Filled.Navigation`) when `started`, 16 dp, with the content descriptions from Global Constraints, placed beside the headline; muted rows keep their muted tint.
-- [ ] **Step 4: Run** `./gradlew test :app:assembleDebug` → PASS and APK builds.
-- [ ] **Step 5: Commit**: `git commit -m "Show GPS and started icons on stop view arrivals"`.
+- [x] **Step 1: Write failing tests:** `display carries hasGps and started` (live arrival with both true → both true on the `ArrivalDisplay`); `a timetable-only arrival shows neither` (isRealtime false, flags false → both false and `detailLine` unchanged from today).
+- [x] **Step 2: Run** `./gradlew :core:test --tests '*ArrivalDisplayTest*'` → FAIL.
+- [x] **Step 3: Implement** the two fields on `ArrivalDisplay`, copied in `Arrival.display`; in the row composable draw a small GPS icon (`Icons.Filled.GpsFixed`, if not in the icon set used, use `LocationOn`) when `hasGps` and a small forward-arrow icon (`Icons.Filled.Navigation`) when `started`, 16 dp, with the content descriptions from Global Constraints, placed beside the headline; muted rows keep their muted tint.
+- [x] **Step 4: Run** `./gradlew test :app:assembleDebug` → PASS and APK builds.
+- [x] **Step 5: Commit**: `git commit -m "Show GPS and started icons on stop view arrivals"`.
 
 ---
 **Self-review done:** every spec section maps to a task (flags → 1-2, parsing → 3, UI → 4, non-goals untouched). Names consistent across Interfaces blocks. No distance logic or "timetable only" text anywhere. Deploy of the server to the Pi is the user's step.
