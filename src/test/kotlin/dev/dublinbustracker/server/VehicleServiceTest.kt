@@ -76,6 +76,19 @@ class VehicleServiceTest {
     }
 
     @Test
+    fun `the fresh-trip set is built once per snapshot`() {
+        recordVehicles()
+
+        assertTrue(service.hasFreshFix("t1", now = 1_100))
+        assertTrue(service.hasFreshFix("t2", now = 1_100))
+        assertEquals(1, service.fixIndexBuilds)
+
+        recordVehicles()
+        service.hasFreshFix("t1", now = 1_100)
+        assertEquals(2, service.fixIndexBuilds)
+    }
+
+    @Test
     fun `an unknown route has no vehicles`() {
         recordVehicles()
 

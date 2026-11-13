@@ -58,6 +58,7 @@ class ArrivalsService(
     private val store: FeedStore,
     private val staticData: StaticDataRef,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
+    private val vehicles: VehicleService = VehicleService(store, staticData),
 ) {
     private fun feeds(): List<FeedMessage> =
         listOfNotNull(store.latest(FeedKind.TRIP_UPDATES), store.latest(FeedKind.COMBINED)).map { it.feed }
@@ -194,6 +195,7 @@ class ArrivalsService(
                     possiblyPassed = epoch < now - SCHEDULED_PAST_GRACE_SECONDS,
                     scheduledEpochSeconds = scheduled,
                     started = reportedSequence > 1,
+                    hasGps = vehicles.hasFreshFix(tripId, now),
                 )
             }
     }
@@ -283,7 +285,8 @@ class ArrivalsService(
         val trip = staticData.current.trip(update.trip.tripId)
         val routeId = trip?.routeId ?: update.trip.routeId
         if (wantedRouteIds != null && routeId !in wantedRouteIds) return emptySequence()
-        val started = (update.firstReport(now)?.stopSequence ?: 0) > 1
+        // Lazy: only trips that actually call this stop pay for it (route arrivals loops every stop).
+        val started by lazy { (update.firstReport(now)?.stopSequence ?: 0) > 1 }
 
         return update.stopTimeUpdateList.asSequence()
             .filter { it.stopId == stopId }
@@ -306,6 +309,7 @@ class ArrivalsService(
                     possiblyPassed = event.time < now - SCHEDULED_PAST_GRACE_SECONDS,
                     scheduledEpochSeconds = scheduledFor(update.trip.tripId, stopTimeUpdate, event),
                     started = started,
+                    hasGps = vehicles.hasFreshFix(update.trip.tripId, now),
                 )
             }
     }

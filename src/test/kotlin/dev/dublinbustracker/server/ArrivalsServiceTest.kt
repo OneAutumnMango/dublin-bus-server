@@ -94,6 +94,44 @@ class ArrivalsServiceTest {
         assertFalse(svc.arrivalsForStop("s1").single().started)
     }
 
+    private fun hasGpsWithFixAt(fixTimestamp: Long?): Boolean {
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(
+                Fixtures.stopTimeUpdate("s2", epochSeconds = 1_500, stopSequence = 3),
+            ))),
+        )
+        if (fixTimestamp != null) {
+            store.record(
+                FeedKind.VEHICLES,
+                Fixtures.feedOf(Fixtures.vehicleEntity("v1", "bus-1", "t1", 53.34, -6.25, fixTimestamp)),
+            )
+        }
+        return service.arrivalsForStop("s2").single().hasGps
+    }
+
+    @Test
+    fun `hasGps is true when the vehicle feed has a fresh fix for the trip`() {
+        assertTrue(hasGpsWithFixAt(1_000L - 30))
+    }
+
+    @Test
+    fun `hasGps is false for a fix older than three minutes`() {
+        assertFalse(hasGpsWithFixAt(1_000L - 600))
+    }
+
+    @Test
+    fun `hasGps is false when no vehicle reports the trip`() {
+        assertFalse(hasGpsWithFixAt(null))
+    }
+
+    @Test
+    fun `scheduled-only arrivals never have gps`() {
+        val svc = scheduledService(bundleWithSchedule("1111111", secondsSinceDublinMidnight + 10 * 60))
+
+        assertFalse(svc.arrivalsForStop("s1").single().hasGps)
+    }
+
     @Test
     fun `arrival carries trip, vehicle and delay details`() {
         recordTripUpdates()

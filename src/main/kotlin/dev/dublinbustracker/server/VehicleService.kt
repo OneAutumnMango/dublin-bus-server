@@ -24,6 +24,9 @@ data class BoundingBox(val minLat: Double, val minLon: Double, val maxLat: Doubl
     }
 }
 
+/** A vehicle fix older than this no longer counts as the bus having GPS. */
+private const val FRESH_FIX_SECONDS = 180L
+
 /** Reads live bus positions, and reconstructs recent tracks from the retained backlog. */
 class VehicleService(
     private val store: FeedStore,
@@ -65,6 +68,29 @@ class VehicleService(
             .distinctBy { it.timestampEpochSeconds }
             .sortedBy { it.timestampEpochSeconds }
             .toList()
+
+    /** Latest fix time per trip, built once per pair of VEHICLES/COMBINED snapshots (compared by identity). */
+    private class FixIndex(val vehicles: FeedSnapshot?, val combined: FeedSnapshot?, val latestByTrip: Map<String, Long>)
+
+    @Volatile private var fixIndex: FixIndex? = null
+
+    /** How many times the fix index was rebuilt; lets tests check it is once per snapshot. */
+    @Volatile internal var fixIndexBuilds = 0
+        private set
+
+    /** True when a vehicle reported [tripId] with a fix under [FRESH_FIX_SECONDS] old at [now]. */
+    fun hasFreshFix(tripId: String, now: Long): Boolean {
+        val vehicles = store.latest(FeedKind.VEHICLES)
+        val combined = store.latest(FeedKind.COMBINED)
+        val index = fixIndex?.takeIf { it.vehicles === vehicles && it.combined === combined }
+            ?: FixIndex(
+                vehicles, combined,
+                latestEntities().filter { it.vehicle.trip.tripId.isNotEmpty() }
+                    .associate { it.vehicle.trip.tripId to it.vehicle.timestamp },
+            ).also { fixIndex = it; fixIndexBuilds++ }
+        val timestamp = index.latestByTrip[tripId] ?: return false
+        return timestamp >= now - FRESH_FIX_SECONDS
+    }
 
     private fun headingOn(shapeId: String, here: LatLon): Float? =
         if (shapeId.isEmpty()) null else headingAlongPath(staticData.current.shapePoints(shapeId), here)

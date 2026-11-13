@@ -26,14 +26,15 @@ class AppServices(
             notifier: NtfyNotifier = NtfyNotifier(null, NtfyLevel.OFF),
         ): AppServices {
             val store = FeedStore(config.historyDepth)
+            val vehicles = VehicleService(store, staticData)
             return AppServices(
                 config = config,
                 staticData = staticData,
                 store = store,
                 client = client,
                 poller = FeedPoller(client, store, config.feeds, config.pollIntervalMs, notifier),
-                arrivals = ArrivalsService(store, staticData),
-                vehicles = VehicleService(store, staticData),
+                arrivals = ArrivalsService(store, staticData, vehicles = vehicles),
+                vehicles = vehicles,
                 alerts = AlertsService(store),
                 staticDataRefresher = StaticDataRefresher(
                     target = staticData,

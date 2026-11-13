@@ -41,6 +41,7 @@ data class ArrivalResponse(
     val possiblyPassed: Boolean = false,
     val scheduledEpochSeconds: Long? = null,
     val started: Boolean = false,
+    val hasGps: Boolean = false,
 )
 
 @Serializable
@@ -177,6 +178,7 @@ fun Arrival.toResponse() = ArrivalResponse(
     possiblyPassed = possiblyPassed,
     scheduledEpochSeconds = scheduledEpochSeconds,
     started = started,
+    hasGps = hasGps,
 )
 
 fun Route.toResponse() = RouteResponse(id, shortName, longName, agencyId)
