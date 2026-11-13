@@ -142,6 +142,30 @@ class ArrivalsServiceTest {
     }
 
     @Test
+    fun `a vehicles-only snapshot invalidates the cached route arrivals and flips hasGps`() = kotlinx.coroutines.runBlocking {
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", stopTimeUpdates = listOf(
+                Fixtures.stopTimeUpdate("s2", epochSeconds = 1_500, stopSequence = 3),
+            ))),
+            fetchedAtEpochMs = 1_000,
+        )
+        val cache = ResponseCache<Boolean>()
+        suspend fun cachedHasGps() = cache.getOrCompute("15", service.feedStamp(), staticData) {
+            service.arrivalsForRoute("15", listOf("s2")).getValue("s2").single().hasGps
+        }
+
+        assertFalse(cachedHasGps())
+        store.record(
+            FeedKind.VEHICLES,
+            Fixtures.feedOf(Fixtures.vehicleEntity("v1", "bus-1", "t1", 53.34, -6.25, 990)),
+            fetchedAtEpochMs = 2_000,
+        )
+
+        assertTrue(cachedHasGps())
+    }
+
+    @Test
     fun `arrival carries trip, vehicle and delay details`() {
         recordTripUpdates()
 

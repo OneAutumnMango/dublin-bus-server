@@ -63,9 +63,15 @@ class ArrivalsService(
     private fun feeds(): List<FeedMessage> =
         listOfNotNull(store.latest(FeedKind.TRIP_UPDATES), store.latest(FeedKind.COMBINED)).map { it.feed }
 
-    /** Identifies the feed state a derived response was computed from: latest TRIP_UPDATES then COMBINED fetch times. */
-    fun feedStamp(): List<Long?> =
-        listOf(store.latest(FeedKind.TRIP_UPDATES)?.fetchedAtEpochMs, store.latest(FeedKind.COMBINED)?.fetchedAtEpochMs)
+    /**
+     * Identifies the feed state a derived response was computed from: latest TRIP_UPDATES, COMBINED
+     * and VEHICLES fetch times (VEHICLES because `hasGps` reads it).
+     */
+    fun feedStamp(): List<Long?> = listOf(
+        store.latest(FeedKind.TRIP_UPDATES)?.fetchedAtEpochMs,
+        store.latest(FeedKind.COMBINED)?.fetchedAtEpochMs,
+        store.latest(FeedKind.VEHICLES)?.fetchedAtEpochMs,
+    )
 
     private fun allTripUpdates(): List<TripUpdate> =
         feeds().asSequence().flatMap { it.entityList.asSequence() }

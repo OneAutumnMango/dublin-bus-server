@@ -220,4 +220,14 @@ class VehicleServiceTest {
         assertTrue(box.contains(LatLon(53.5, -6.25)))
         assertTrue(!box.contains(LatLon(52.9, -6.25)))
     }
+
+    @Test
+    fun `arrival json carries the hasGps and started field names the app reads`() {
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true; explicitNulls = false } // mirrors Main.kt
+        val off = json.encodeToString(ArrivalResponse.serializer(), ArrivalResponse("15", "X", 1, true))
+        val on = json.encodeToString(ArrivalResponse.serializer(), ArrivalResponse("15", "X", 1, true, started = true, hasGps = true))
+
+        assertTrue("\"hasGps\":false" in off && "\"started\":false" in off, off)
+        assertTrue("\"hasGps\":true" in on && "\"started\":true" in on, on)
+    }
 }
