@@ -51,9 +51,14 @@ class StaticDataRefresher(
 
     fun start(scope: CoroutineScope) {
         scope.launch {
+            // The first wait is what is left of the bundle's age, so restarts don't push a stale bundle
+            // another full interval out (0 if it's already older: refresh straight away).
+            val ageMs = System.currentTimeMillis() - File(outputPath).lastModified()
+            var wait = if (File(outputPath).isFile) (intervalMs - ageMs).coerceIn(0, intervalMs) else intervalMs
             while (isActive) {
-                delay(intervalMs)
+                delay(wait)
                 refresh()
+                wait = intervalMs
             }
         }
     }

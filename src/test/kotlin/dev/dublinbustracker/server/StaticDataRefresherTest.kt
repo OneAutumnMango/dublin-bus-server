@@ -3,7 +3,10 @@ package dev.dublinbustracker.server
 import dev.dublinbustracker.data.GtfsStaticData
 import dev.dublinbustracker.data.StaticDataRef
 import dev.dublinbustracker.support.Fixtures
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -34,6 +37,22 @@ class StaticDataRefresherTest {
         )
 
         refresher.refresh()
+
+        assertTrue(target.current.allStops().isNotEmpty())
+    }
+
+    @Test
+    fun `a bundle already older than the interval is refreshed at start`() = runTest {
+        val dir = Files.createTempDirectory("refresher-test").toFile()
+        val fixture = File(dir, "fixture.json").apply { writeText(Fixtures.staticBundleJson()) }
+        val script = fakeScript(dir, "cp '${fixture.path}' \"\$2\"\nexit 0")
+        val out = File(dir, "out.json").apply { writeText("{}"); setLastModified(System.currentTimeMillis() - 48 * 3_600_000L) }
+        val target = StaticDataRef(emptyBundle)
+        StaticDataRefresher(target, out.path, intervalMs = 24 * 3_600_000L, scriptPath = script).start(backgroundScope)
+
+        withContext(Dispatchers.Default) {
+            repeat(100) { if (target.current.allStops().isEmpty()) delay(50) }
+        }
 
         assertTrue(target.current.allStops().isNotEmpty())
     }
