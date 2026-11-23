@@ -42,6 +42,8 @@ data class ArrivalResponse(
     val scheduledEpochSeconds: Long? = null,
     val started: Boolean = false,
     val hasGps: Boolean = false,
+    /** Omitted from the JSON unless true, so default responses are unchanged for existing clients. */
+    val cancelled: Boolean? = null,
 )
 
 @Serializable
@@ -185,6 +187,7 @@ fun Arrival.toResponse() = ArrivalResponse(
     scheduledEpochSeconds = scheduledEpochSeconds,
     started = started,
     hasGps = hasGps,
+    cancelled = cancelled.takeIf { it },
 )
 
 fun Route.toResponse() = RouteResponse(id, shortName, longName, agencyId)

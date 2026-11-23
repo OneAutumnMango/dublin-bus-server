@@ -46,6 +46,8 @@ data class Arrival(
     val started: Boolean = false,
     /** A live trip whose bus has a vehicle-feed fix under 3 minutes old; false for timetable-only. */
     val hasGps: Boolean = false,
+    /** The trip is cancelled, or skips this stop; its scheduled time is kept. Only built on request. */
+    val cancelled: Boolean = false,
 )
 
 /** Where a bus is right now, from the Vehicles feed. */

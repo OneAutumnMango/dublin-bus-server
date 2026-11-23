@@ -138,12 +138,12 @@ printed at the roadside. `limit` defaults to 50 and caps at 500.
 | `GET /v1/stops?query=&limit=` | Stop search by name or number |
 | `GET /v1/stops/nearby?lat=&lon=&radius=&limit=` | Stops near a point (radius in metres, default 500) |
 | `GET /v1/stops/{stop}` | One stop, with the routes serving it |
-| `GET /v1/stops/{stop}/arrivals?route=&limit=` | Live arrivals, optionally for one bus number |
+| `GET /v1/stops/{stop}/arrivals?route=&limit=&includeCancelled=` | Live arrivals, optionally for one bus number. `includeCancelled=true` also returns cancelled trips and skipped stops at their scheduled time with `"cancelled":true` (omitted otherwise, so default responses are unchanged) |
 | `GET /v1/routes?query=&limit=` | Route search |
 | `GET /v1/routes/{route}` | Route variants sharing a bus number |
 | `GET /v1/routes/{route}/stops?direction=` | Ordered stops along the route, per direction |
 | `GET /v1/routes/{route}/shape?direction=&format=points` | Route geometry as an encoded polyline |
-| `GET /v1/routes/{route}/arrivals?limit=` | Live arrivals at every stop on the route, by stop id (stops with none left out) |
+| `GET /v1/routes/{route}/arrivals?limit=&includeCancelled=` | Live arrivals at every stop on the route, by stop id (stops with none left out) |
 | `GET /v1/routes/{route}/vehicles` | Every bus currently running that route |
 | `GET /v1/vehicles?route=&bbox=&limit=` | Live positions, filterable by route or bounding box |
 | `GET /v1/vehicles/{id}` | One bus, with its route and trip |
@@ -191,7 +191,7 @@ NTA revises the static schedule periodically, and when it does, the GTFS-Realtim
 ids stop matching the bundle - trip headsigns go blank and `/v1/trips/{id}` 404s, even though
 stops, routes and vehicle positions are unaffected (they resolve by route/stop id, not trip id).
 The server re-runs this same pipeline on its own every `GTFS_REFRESH_INTERVAL_HOURS` (default
-24) and hot-swaps the result in, so this self-heals without a restart. A failed refresh just
+24, counted from the bundle file's age, so restarts don't delay it) and hot-swaps the result in, so this self-heals without a restart. It also refreshes early when the live feed has trips the bundle doesn't know for 5 polls in a row (at most once per 6 hours); `/v1/status` shows `unmatchedTripUpdates` and `lastStaticRefreshEpochMs`. A failed refresh just
 logs (and pushes a `warn`-level alert if `NTFY_URL` is set) and keeps serving the old bundle.
 
 ## Notes

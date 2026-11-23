@@ -785,6 +785,51 @@ class ArrivalsServiceTest {
     }
 
     @Test
+    fun `includeCancelled returns a cancelled trip at its scheduled time, flagged`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(Fixtures.tripUpdateEntity("e1", tripId = "t1", cancelled = true)),
+        )
+
+        val arrival = svc.arrivalsForStop("s1", includeCancelled = true).single()
+
+        assertTrue(arrival.cancelled)
+        assertEquals("t1", arrival.tripId)
+        assertFalse(arrival.isRealtime)
+        assertEquals(arrival.scheduledEpochSeconds, arrival.expectedEpochSeconds)
+        assertEquals(emptyList(), svc.arrivalsForStop("s1"))
+    }
+
+    @Test
+    fun `includeCancelled flags a skipped stop but not the stops the trip still serves`() {
+        val (store, svc) = twoStopService()
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity(
+                    "e1",
+                    tripId = "t1",
+                    stopTimeUpdates = listOf(Fixtures.stopTimeUpdate("s1", wednesdayMorning + 60, relationship = skipped)),
+                ),
+            ),
+        )
+
+        assertTrue(svc.arrivalsForStop("s1", includeCancelled = true).single().cancelled)
+        assertTrue(svc.arrivalsForStop("s1").isEmpty())
+        assertTrue(svc.arrivalsForStop("s2", includeCancelled = true).none { it.cancelled })
+    }
+
+    @Test
+    fun `cancelled is left out of the JSON unless true`() {
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true; explicitNulls = false }
+        val normal = json.encodeToString(ArrivalResponse.serializer(), Arrival("15", "X", 3, false).toResponse())
+        val cancelled = json.encodeToString(ArrivalResponse.serializer(), Arrival("15", "X", 3, false, cancelled = true).toResponse())
+        assertFalse("cancelled" in normal)
+        assertTrue("\"cancelled\":true" in cancelled)
+    }
+
+    @Test
     fun `a cancelled trip's own stop times are ignored too`() {
         val (store, svc) = twoStopService()
         store.record(

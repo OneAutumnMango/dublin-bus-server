@@ -29,7 +29,7 @@ fun Routing.configureRoutes(services: AppServices) {
             call.respond(HttpStatusCode.BadRequest, ErrorResponse("stopId query parameter is required"))
             return@get
         }
-        call.respond(services.arrivals.arrivalsForStop(stopId).map { it.toResponse() })
+        call.respond(services.arrivals.arrivalsForStop(stopId, includeCancelled = call.includeCancelled()).map { it.toResponse() })
     }
 
     get("/stops") {
@@ -77,7 +77,7 @@ fun Routing.configureRoutes(services: AppServices) {
             val data = staticData.current
             val stop = data.stopByIdOrCode(call.parameters["stopId"].orEmpty()) ?: return@get call.notFound("unknown stop")
             val route = call.request.queryParameters["route"]
-            call.respond(services.arrivals.arrivalsForStop(stop.id, route, call.limit()).map { it.toResponse() })
+            call.respond(services.arrivals.arrivalsForStop(stop.id, route, call.limit(), call.includeCancelled()).map { it.toResponse() })
         }
 
         get("/routes") {
@@ -120,9 +120,10 @@ fun Routing.configureRoutes(services: AppServices) {
             val identifier = call.parameters["route"].orEmpty()
             val route = data.resolveRoutes(identifier).firstOrNull() ?: return@get call.notFound("unknown route")
             val limit = call.limit()
+            val includeCancelled = call.includeCancelled()
             val stopIds = data.patternsForRoute(route.id).values.flatten().distinct()
-            val byStop = services.routeArrivalsCache.getOrCompute("$identifier|$limit", services.arrivals.feedStamp(), data) {
-                services.arrivals.arrivalsForRoute(identifier, stopIds, limit).mapValues { (_, v) -> v.map { it.toResponse() } }
+            val byStop = services.routeArrivalsCache.getOrCompute("$identifier|$limit|$includeCancelled", services.arrivals.feedStamp(), data) {
+                services.arrivals.arrivalsForRoute(identifier, stopIds, limit, includeCancelled).mapValues { (_, v) -> v.map { it.toResponse() } }
             }
             call.respond(byStop)
         }
@@ -242,6 +243,9 @@ private suspend fun ApplicationCall.respondShape(shapeId: String, data: GtfsStat
 
 private suspend fun ApplicationCall.notFound(message: String) =
     respond(HttpStatusCode.NotFound, ErrorResponse(message))
+
+private fun ApplicationCall.includeCancelled(): Boolean =
+    request.queryParameters["includeCancelled"] == "true"
 
 private fun ApplicationCall.limit(): Int =
     request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, MAX_LIMIT) ?: DEFAULT_LIMIT

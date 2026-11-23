@@ -88,10 +88,10 @@ class ArrivalsService(
         return updates.count { it.isCancelled() } to updates.sumOf { u -> u.stopTimeUpdateList.count { it.isSkipped() } }
     }
 
-    fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50): List<Arrival> {
+    fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50, includeCancelled: Boolean = false): List<Arrival> {
         val now = nowEpochSeconds()
         val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }
-        return arrivalsAtStop(stopId, now, wantedRouteIds, allTripUpdates(), limit)
+        return arrivalsAtStop(stopId, now, wantedRouteIds, allTripUpdates(), limit, includeCancelled)
     }
 
     /**
@@ -99,7 +99,12 @@ class ArrivalsService(
      * a route filter. The feed is narrowed to the route's trips once rather than once per stop.
      * Stops with no arrivals are omitted; order follows [stopIds].
      */
-    fun arrivalsForRoute(routeIdentifier: String, stopIds: Collection<String>, limit: Int = 50): Map<String, List<Arrival>> {
+    fun arrivalsForRoute(
+        routeIdentifier: String,
+        stopIds: Collection<String>,
+        limit: Int = 50,
+        includeCancelled: Boolean = false,
+    ): Map<String, List<Arrival>> {
         val static = staticData.current
         val wantedRouteIds = static.resolveRoutes(routeIdentifier).map { it.id }.toSet()
         if (wantedRouteIds.isEmpty()) return emptyMap()
@@ -109,7 +114,7 @@ class ArrivalsService(
         val routeUpdates = allTripUpdates().filter { (static.trip(it.trip.tripId)?.routeId ?: it.trip.routeId) in wantedRouteIds }
         val result = LinkedHashMap<String, List<Arrival>>()
         for (stopId in stopIds) {
-            val arrivals = arrivalsAtStop(stopId, now, wantedRouteIds, routeUpdates, limit)
+            val arrivals = arrivalsAtStop(stopId, now, wantedRouteIds, routeUpdates, limit, includeCancelled)
             if (arrivals.isNotEmpty()) result[stopId] = arrivals
         }
         return result
@@ -121,6 +126,7 @@ class ArrivalsService(
         wantedRouteIds: Set<String>?,
         allUpdates: List<TripUpdate>,
         limit: Int,
+        includeCancelled: Boolean = false,
     ): List<Arrival> {
         // A cancelled trip, or one that skips this very stop, must show nowhere - not even as a
         // cascaded estimate or a "(scheduled)" fallback from the static timetable.
@@ -151,7 +157,15 @@ class ArrivalsService(
         val liveTripIds = directTripIds + tripUpdates.filter { it.firstReport(now) != null }.map { it.trip.tripId }
         val scheduled = scheduledArrivalsForStop(stopId, now, wantedRouteIds, liveTripIds + suppressedTripIds)
 
-        return (direct.asSequence() + cascaded.asSequence() + scheduled)
+        // Opt-in only: the default response must never show a cancelled bus, even as "cancelled".
+        val cancelledArrivals = if (includeCancelled) {
+            scheduledArrivalsForStop(stopId, now, wantedRouteIds, emptySet(), onlyTripIds = suppressedTripIds)
+                .map { it.copy(cancelled = true) }
+        } else {
+            emptySequence()
+        }
+
+        return (direct.asSequence() + cascaded.asSequence() + scheduled + cancelledArrivals)
             // Ones that may already have left go last, so they never push a real bus down the list.
             .sortedWith(compareBy({ it.possiblyPassed }, { it.expectedEpochSeconds }))
             .take(limit)
@@ -260,12 +274,13 @@ class ArrivalsService(
         now: Long,
         wantedRouteIds: Set<String>?,
         excludeTripIds: Set<String>,
+        onlyTripIds: Set<String>? = null,
     ): Sequence<Arrival> {
         val today = Instant.ofEpochSecond(now).atZone(SCHEDULE_ZONE).toLocalDate()
         val horizon = now + SCHEDULED_LOOKAHEAD_SECONDS
 
         return staticData.current.scheduledCallsForStop(stopId).asSequence()
-            .filter { it.tripId !in excludeTripIds }
+            .filter { it.tripId !in excludeTripIds && (onlyTripIds == null || it.tripId in onlyTripIds) }
             .mapNotNull { call ->
                 val trip = staticData.current.trip(call.tripId) ?: return@mapNotNull null
                 if (wantedRouteIds != null && trip.routeId !in wantedRouteIds) return@mapNotNull null
