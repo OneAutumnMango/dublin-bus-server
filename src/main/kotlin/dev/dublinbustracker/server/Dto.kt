@@ -163,6 +163,9 @@ data class StatusResponse(
     /** Live trip updates with no trip in the static bundle; near 0 when the bundle matches the feed. */
     val unmatchedTripUpdates: Int = 0,
     val lastStaticRefreshEpochMs: Long = 0,
+    val cancelledTrips: Int = 0,
+    val skippedStopUpdates: Int = 0,
+    val alerts: Int = 0,
 )
 
 fun Stop.toResponse(routes: List<String> = emptyList()) =

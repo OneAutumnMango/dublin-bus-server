@@ -248,6 +248,7 @@ private fun ApplicationCall.limit(): Int =
 
 private fun AppServices.buildStatus(): StatusResponse {
     val now = System.currentTimeMillis()
+    val (cancelled, skipped) = arrivals.cancellationCounts()
     return StatusResponse(
         pollIntervalMs = config.pollIntervalMs,
         minimumSafePollIntervalMs = config.minimumSafePollIntervalMs,
@@ -271,5 +272,8 @@ private fun AppServices.buildStatus(): StatusResponse {
         },
         unmatchedTripUpdates = staticDataRefresher.unmatchedTripUpdates,
         lastStaticRefreshEpochMs = staticDataRefresher.lastRefreshEpochMs,
+        cancelledTrips = cancelled,
+        skippedStopUpdates = skipped,
+        alerts = this.alerts.alerts().size,
     )
 }

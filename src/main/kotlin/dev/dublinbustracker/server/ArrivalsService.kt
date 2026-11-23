@@ -79,6 +79,15 @@ class ArrivalsService(
         feeds().asSequence().flatMap { it.entityList.asSequence() }
             .filter { it.hasTripUpdate() }.map { it.tripUpdate }.toList()
 
+    /**
+     * Cancelled trips and skipped stop updates in the latest snapshot. Surfaced in /v1/status because
+     * it is not known whether NTA fills these in at all, or only publishes alerts.
+     */
+    fun cancellationCounts(): Pair<Int, Int> {
+        val updates = allTripUpdates()
+        return updates.count { it.isCancelled() } to updates.sumOf { u -> u.stopTimeUpdateList.count { it.isSkipped() } }
+    }
+
     fun arrivalsForStop(stopId: String, routeFilter: String? = null, limit: Int = 50): List<Arrival> {
         val now = nowEpochSeconds()
         val wantedRouteIds = routeFilter?.let { filter -> staticData.current.resolveRoutes(filter).map { it.id }.toSet() }

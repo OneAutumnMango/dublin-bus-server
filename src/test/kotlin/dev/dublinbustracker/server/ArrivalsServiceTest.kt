@@ -1236,4 +1236,24 @@ class ArrivalsServiceTest {
 
         assertEquals(emptyMap(), service.arrivalsForRoute("999", listOf("s1", "s2")))
     }
+
+    @Test
+    fun `cancellation counts report cancelled trips and skipped stop updates`() {
+        store.record(
+            FeedKind.TRIP_UPDATES,
+            Fixtures.feedOf(
+                Fixtures.tripUpdateEntity("e1", tripId = "t1", cancelled = true),
+                Fixtures.tripUpdateEntity("e2", tripId = "t2", cancelled = true),
+                Fixtures.tripUpdateEntity(
+                    "e3", tripId = "t3",
+                    stopTimeUpdates = listOf(
+                        Fixtures.stopTimeUpdate("s1", 1_100, relationship = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED),
+                        Fixtures.stopTimeUpdate("s2", 1_200, relationship = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED),
+                        Fixtures.stopTimeUpdate("s3", 1_300),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(2 to 2, service.cancellationCounts())
+    }
 }
