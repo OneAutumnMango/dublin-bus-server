@@ -135,7 +135,8 @@ printed at the roadside. `limit` defaults to 50 and caps at 500.
 | Endpoint | Returns |
 | --- | --- |
 | `GET /health` | Liveness |
-| `GET /v1/status` | Poll rate, backlog depth, feed freshness, bundle stats |
+| `GET /v1/status` | Poll rate, backlog depth, feed freshness, bundle stats, `staticRefreshRunning` |
+| `POST /v1/static/refresh` | Re-download and rebuild the static bundle now (see below). `202` started, `409` one is already running |
 | `GET /v1/stops?query=&limit=` | Stop search by name or number |
 | `GET /v1/stops/nearby?lat=&lon=&radius=&limit=` | Stops near a point (radius in metres, default 500) |
 | `GET /v1/stops/{stop}` | One stop, with the routes serving it |
@@ -194,6 +195,15 @@ stops, routes and vehicle positions are unaffected (they resolve by route/stop i
 The server re-runs this same pipeline on its own every `GTFS_REFRESH_INTERVAL_HOURS` (default
 24, counted from the bundle file's age, so restarts don't delay it) and hot-swaps the result in, so this self-heals without a restart. It also refreshes early when the live feed has trips the bundle doesn't know for 5 polls in a row (at least `GTFS_MISMATCH_PERCENT` of 100+ trip updates; at most once per 6 hours); `/v1/status` shows `unmatchedTripUpdates` and `lastStaticRefreshEpochMs`. A failed refresh just
 logs (and pushes a `warn`-level alert if `NTFY_URL` is set) and keeps serving the old bundle.
+
+### Forcing a refresh
+
+```
+docker exec dublin-bus-server curl -s -X POST localhost:8080/v1/static/refresh
+docker exec dublin-bus-server curl -s localhost:8080/v1/status   # staticRefreshRunning, lastStaticRefreshEpochMs
+```
+
+It starts straight away, ignoring the cooldown and the bundle's age, and the server keeps serving the old bundle until the new one is ready. It downloads and filters ~700MB, so expect high memory use for a few minutes on a small machine (see the memory note above). Like every endpoint here it has no auth: keep the port off the public internet.
 
 ## Notes
 

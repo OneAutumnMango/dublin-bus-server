@@ -11,6 +11,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 
 private const val DEFAULT_LIMIT = 50
@@ -41,6 +42,16 @@ fun Routing.configureRoutes(services: AppServices) {
     route("/v1") {
         get("/status") {
             call.respond(services.buildStatus())
+        }
+
+        // Like the rest of this server it has no auth: keep the port off the public internet.
+        post("/static/refresh") {
+            val refresher = services.staticDataRefresher
+            when {
+                refresher.requestRefresh() -> call.respond(HttpStatusCode.Accepted, mapOf("status" to "refresh started"))
+                refresher.isRefreshing -> call.respond(HttpStatusCode.Conflict, ErrorResponse("a refresh is already running"))
+                else -> call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("the refresher is not running"))
+            }
         }
 
         get("/stops") {
@@ -275,6 +286,7 @@ private fun AppServices.buildStatus(): StatusResponse {
             )
         },
         unmatchedTripUpdates = staticDataRefresher.unmatchedTripUpdates,
+        staticRefreshRunning = staticDataRefresher.isRefreshing,
         lastStaticRefreshEpochMs = staticDataRefresher.lastRefreshEpochMs,
         cancelledTrips = cancelled,
         skippedStopUpdates = skipped,

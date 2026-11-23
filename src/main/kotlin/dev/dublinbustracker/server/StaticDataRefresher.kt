@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-private const val DEFAULT_SCRIPT_PATH = "scripts/fetch-gtfs-data.sh"
+internal const val DEFAULT_SCRIPT_PATH = "scripts/fetch-gtfs-data.sh"
 private const val STREAK_POLLS = 5
 // Measured on the Pi: ~9% of live trip updates are unmatched on a correct bundle (operators the filter drops),
 // 83% when NTA changed its ids. 20% leaves margin over a possibly higher-than-usual 9%; the minimum count keeps quiet night polls from tripping it.
@@ -73,14 +73,32 @@ class StaticDataRefresher(
         scope.launch { attempt() }
     }
 
-    private suspend fun attempt() {
-        if (!running.compareAndSet(false, true)) return
+    /** The caller must have won the [running] flag. */
+    private suspend fun runLocked() {
         try {
             lastRefreshEpochMs = nowMs()
             refresh()
         } finally {
             running.set(false)
         }
+    }
+
+    private suspend fun attempt() {
+        if (running.compareAndSet(false, true)) runLocked()
+    }
+
+    val isRefreshing: Boolean get() = running.get()
+
+    /**
+     * Starts a refresh now, ignoring the cooldown and the bundle's age. False if one is already
+     * running or the refresher has not been started.
+     */
+    fun requestRefresh(): Boolean {
+        val scope = scope ?: return false
+        if (!running.compareAndSet(false, true)) return false
+        logger.info("Static GTFS refresh requested")
+        scope.launch { runLocked() }
+        return true
     }
 
     suspend fun refresh() = withContext(Dispatchers.IO) {

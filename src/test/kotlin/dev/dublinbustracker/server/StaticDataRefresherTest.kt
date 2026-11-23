@@ -18,6 +18,7 @@ import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -187,6 +188,30 @@ class StaticDataRefresherTest {
         waitFor { rig.runs == 1 }
         assertEquals(1, rig.runs)
         assertEquals(100, rig.refresher.unmatchedTripUpdates)
+    }
+
+    @Test
+    fun `requestRefresh runs a refresh now, ignoring the cooldown and a fresh bundle`() = runTest {
+        val rig = Rig()
+        rig.refresher.start(rig.scope)
+        assertTrue(rig.refresher.requestRefresh())
+        waitFor { rig.runs == 1 }
+        waitFor { !rig.refresher.isRefreshing }
+        assertEquals(1, rig.runs)
+        assertTrue(rig.refresher.requestRefresh()) // no cooldown for a manual request
+        waitFor { rig.runs == 2 }
+        assertEquals(2, rig.runs)
+    }
+
+    @Test
+    fun `requestRefresh is refused while one runs and before the refresher starts`() = runTest {
+        val rig = Rig(cooldownMs = 0, scriptBody = "sleep 1\ncp '\$(dirname \"\$0\")/fixture.json' \"\$2\"")
+        assertFalse(rig.refresher.requestRefresh()) // never started
+        rig.refresher.start(rig.scope)
+        assertTrue(rig.refresher.requestRefresh())
+        assertFalse(rig.refresher.requestRefresh())
+        waitFor { rig.runs == 1 }
+        assertEquals(1, rig.runs)
     }
 
     @Test

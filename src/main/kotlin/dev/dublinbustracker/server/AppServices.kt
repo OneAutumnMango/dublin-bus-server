@@ -25,6 +25,7 @@ class AppServices(
             staticData: StaticDataRef,
             client: RealtimeGtfsClient,
             notifier: NtfyNotifier = NtfyNotifier(null, NtfyLevel.OFF),
+            refreshScriptPath: String = DEFAULT_SCRIPT_PATH,
         ): AppServices {
             val store = FeedStore(config.historyDepth)
             val vehicles = VehicleService(store, staticData)
@@ -37,6 +38,7 @@ class AppServices(
                 notifier = notifier,
                 intervalMs = TimeUnit.HOURS.toMillis(config.gtfsRefreshIntervalHours),
                 minUnmatchedFraction = config.gtfsMismatchPercent / 100.0,
+                scriptPath = refreshScriptPath,
             )
             return AppServices(
                 config = config,

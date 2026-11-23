@@ -6,6 +6,7 @@ import dev.dublinbustracker.data.RealtimeGtfsClient
 import dev.dublinbustracker.data.StaticDataRef
 import dev.dublinbustracker.support.Fixtures
 import io.ktor.client.request.get
+import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
@@ -20,7 +21,7 @@ import kotlin.test.assertTrue
 class RoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun services(bundle: String = Fixtures.staticBundleJson()): AppServices {
+    private fun services(bundle: String = Fixtures.staticBundleJson(), refreshScript: String = DEFAULT_SCRIPT_PATH): AppServices {
         val staticData = StaticDataRef(GtfsStaticData.parse(bundle))
         val config = ServerConfig(
             port = 0,
@@ -36,7 +37,7 @@ class RoutesTest {
             gtfsRefreshIntervalHours = 24 * 365,
         )
         val client = RealtimeGtfsClient(listOf("nta-key"), baseUrl = config.gtfsBaseUrl)
-        return AppServices.build(config, staticData, client).also { seed(it) }
+        return AppServices.build(config, staticData, client, refreshScriptPath = refreshScript).also { seed(it) }
     }
 
     private fun seed(services: AppServices) {
@@ -77,6 +78,23 @@ class RoutesTest {
 
     private fun ApplicationTestBuilder.startServer(bundle: String = Fixtures.staticBundleJson()) {
         application { configureServer(services(bundle)) }
+    }
+
+    @Test
+    fun `posting to static refresh starts one refresh and a second is refused while it runs`() = testApplication {
+        // A fake script, never the real 700 MB download.
+        val script = java.nio.file.Files.createTempFile("fake-refresh", ".sh").toFile().apply {
+            writeText("#!/bin/bash\nsleep 3\nexit 1\n")
+            setExecutable(true)
+            deleteOnExit()
+        }
+        application { configureServer(services(refreshScript = script.path)) }
+
+        val first = client.post("/v1/static/refresh")
+        assertEquals(HttpStatusCode.Accepted, first.status)
+        assertEquals(HttpStatusCode.Conflict, client.post("/v1/static/refresh").status)
+        val status = json.decodeFromString<StatusResponse>(client.get("/v1/status").bodyAsText())
+        assertEquals(true, status.staticRefreshRunning)
     }
 
     @Test

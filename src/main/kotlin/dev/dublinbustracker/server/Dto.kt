@@ -171,6 +171,7 @@ data class StatusResponse(
     val cancelledTrips: Int = 0,
     val skippedStopUpdates: Int = 0,
     val alerts: Int = 0,
+    val staticRefreshRunning: Boolean = false,
 )
 
 fun Stop.toResponse(routes: List<String> = emptyList()) =
