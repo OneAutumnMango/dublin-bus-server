@@ -1,5 +1,6 @@
 package dev.dublinbustracker.server
 
+import dev.dublinbustracker.data.FeedKind
 import dev.dublinbustracker.data.RealtimeGtfsClient
 import dev.dublinbustracker.data.StaticDataRef
 import java.io.File
@@ -27,24 +28,27 @@ class AppServices(
         ): AppServices {
             val store = FeedStore(config.historyDepth)
             val vehicles = VehicleService(store, staticData)
+            val refresher = StaticDataRefresher(
+                target = staticData,
+                // No path configured means the server booted from the bundled resource; a refresh
+                // still needs somewhere on disk to write the fresh bundle to.
+                outputPath = config.gtfsStaticPath
+                    ?: File(System.getProperty("java.io.tmpdir"), "dublin-bus-server-gtfs_static.json").path,
+                notifier = notifier,
+                intervalMs = TimeUnit.HOURS.toMillis(config.gtfsRefreshIntervalHours),
+            )
             return AppServices(
                 config = config,
                 staticData = staticData,
                 store = store,
                 client = client,
-                poller = FeedPoller(client, store, config.feeds, config.pollIntervalMs, notifier),
+                poller = FeedPoller(client, store, config.feeds, config.pollIntervalMs, notifier) { kind, feed ->
+                    if (kind == FeedKind.TRIP_UPDATES) refresher.observe(feed)
+                },
                 arrivals = ArrivalsService(store, staticData, vehicles = vehicles),
                 vehicles = vehicles,
                 alerts = AlertsService(store),
-                staticDataRefresher = StaticDataRefresher(
-                    target = staticData,
-                    // No path configured means the server booted from the bundled resource; a refresh
-                    // still needs somewhere on disk to write the fresh bundle to.
-                    outputPath = config.gtfsStaticPath
-                        ?: File(System.getProperty("java.io.tmpdir"), "dublin-bus-server-gtfs_static.json").path,
-                    notifier = notifier,
-                    intervalMs = TimeUnit.HOURS.toMillis(config.gtfsRefreshIntervalHours),
-                ),
+                staticDataRefresher = refresher,
             )
         }
     }

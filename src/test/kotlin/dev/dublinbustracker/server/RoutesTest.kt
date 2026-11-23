@@ -123,6 +123,8 @@ class RoutesTest {
         assertEquals(3, status.staticData["stops"])
         assertEquals(2, status.feeds.size)
         assertEquals(2, status.feeds.single { it.feed == "VEHICLES" }.retainedSnapshots)
+        assertEquals(0, status.unmatchedTripUpdates)
+        assertEquals(0L, status.lastStaticRefreshEpochMs)
     }
 
     // --- stops ---------------------------------------------------------------

@@ -56,6 +56,24 @@ class FeedPollerTest {
     }
 
     @Test
+    fun `onFeed is called with the kind and message after a successful fetch`() = runTest {
+        server.enqueue(protobufResponse("a"))
+        val seen = mutableListOf<Pair<FeedKind, Int>>()
+        FeedPoller(client("k1"), FeedStore(historyDepth = 5), listOf(FeedKind.TRIP_UPDATES), intervalMs = 60_000) { kind, feed ->
+            seen += kind to feed.entityCount
+        }.refreshAll()
+        assertEquals(listOf(FeedKind.TRIP_UPDATES to 1), seen)
+    }
+
+    @Test
+    fun `onFeed is not called when the fetch fails`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500))
+        var calls = 0
+        FeedPoller(client("k1"), FeedStore(historyDepth = 5), listOf(FeedKind.TRIP_UPDATES), intervalMs = 60_000) { _, _ -> calls++ }.refreshAll()
+        assertEquals(0, calls)
+    }
+
+    @Test
     fun `only the configured feeds are polled`() = runTest {
         server.enqueue(protobufResponse("a"))
         val store = FeedStore(historyDepth = 5)

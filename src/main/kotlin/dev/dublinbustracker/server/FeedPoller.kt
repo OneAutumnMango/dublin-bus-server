@@ -28,6 +28,8 @@ class FeedPoller(
     private val feeds: List<FeedKind>,
     private val intervalMs: Long,
     private val notifier: NtfyNotifier = NtfyNotifier(null, NtfyLevel.OFF),
+    /** Called after each successful fetch is stored, e.g. to check the bundle still matches the feed. */
+    private val onFeed: (FeedKind, FeedMessage) -> Unit = { _, _ -> },
 ) {
     private val logger = LoggerFactory.getLogger(FeedPoller::class.java)
     private val successes = AtomicLong(0)
@@ -43,6 +45,7 @@ class FeedPoller(
             fetch(kind)
                 .onSuccess { feed ->
                     store.record(kind, feed)
+                    onFeed(kind, feed)
                     successes.incrementAndGet()
                     logger.debug("Refreshed {} ({} entities)", kind, feed.entityCount)
                     if ((consecutiveFailures.remove(kind) ?: 0) >= STALE_THRESHOLD) {

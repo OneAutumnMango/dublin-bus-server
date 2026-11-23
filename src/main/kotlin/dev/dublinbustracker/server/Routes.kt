@@ -269,5 +269,7 @@ private fun AppServices.buildStatus(): StatusResponse {
                 retainedSnapshots = store.depth(kind),
             )
         },
+        unmatchedTripUpdates = staticDataRefresher.unmatchedTripUpdates,
+        lastStaticRefreshEpochMs = staticDataRefresher.lastRefreshEpochMs,
     )
 }
