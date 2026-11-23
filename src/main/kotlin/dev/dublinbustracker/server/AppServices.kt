@@ -36,6 +36,7 @@ class AppServices(
                     ?: File(System.getProperty("java.io.tmpdir"), "dublin-bus-server-gtfs_static.json").path,
                 notifier = notifier,
                 intervalMs = TimeUnit.HOURS.toMillis(config.gtfsRefreshIntervalHours),
+                minUnmatchedFraction = config.gtfsMismatchPercent / 100.0,
             )
             return AppServices(
                 config = config,

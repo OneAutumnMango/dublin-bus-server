@@ -65,6 +65,7 @@ All configuration is environment variables (see `server.env.example`).
 | `ALLOW_UNSAFE_POLL_RATE` | `false` | Permit exceeding the fair-usage limit |
 | `GTFS_STATIC_PATH` | bundled resource | Where the static bundle lives |
 | `GTFS_REFRESH_INTERVAL_HOURS` | `24` | How often the static bundle re-fetches itself (see below) |
+| `GTFS_MISMATCH_PERCENT` | `20` | Refresh the bundle early when at least this percent of live trip updates (100+ of them, 5 polls in a row) have no trip in it. About 9% is normal on a correct bundle; 1-100 |
 | `GTFSR_BASE_URL` | NTA v2 endpoint | Override for testing |
 | `NTFY_URL` | – | Push URL for a self-hosted [ntfy](https://ntfy.sh) topic. Blank disables alerting |
 | `NTFY_LEVEL` | `info` | How much to push: `off`, `error`, `warn`, `info` (see below) |
@@ -191,7 +192,7 @@ NTA revises the static schedule periodically, and when it does, the GTFS-Realtim
 ids stop matching the bundle - trip headsigns go blank and `/v1/trips/{id}` 404s, even though
 stops, routes and vehicle positions are unaffected (they resolve by route/stop id, not trip id).
 The server re-runs this same pipeline on its own every `GTFS_REFRESH_INTERVAL_HOURS` (default
-24, counted from the bundle file's age, so restarts don't delay it) and hot-swaps the result in, so this self-heals without a restart. It also refreshes early when the live feed has trips the bundle doesn't know for 5 polls in a row (at least 20% of 100+ trip updates; about 9% is normal; at most once per 6 hours); `/v1/status` shows `unmatchedTripUpdates` and `lastStaticRefreshEpochMs`. A failed refresh just
+24, counted from the bundle file's age, so restarts don't delay it) and hot-swaps the result in, so this self-heals without a restart. It also refreshes early when the live feed has trips the bundle doesn't know for 5 polls in a row (at least `GTFS_MISMATCH_PERCENT` of 100+ trip updates; at most once per 6 hours); `/v1/status` shows `unmatchedTripUpdates` and `lastStaticRefreshEpochMs`. A failed refresh just
 logs (and pushes a `warn`-level alert if `NTFY_URL` is set) and keeps serving the old bundle.
 
 ## Notes

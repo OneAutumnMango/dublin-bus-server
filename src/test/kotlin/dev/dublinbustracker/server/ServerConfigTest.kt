@@ -25,6 +25,16 @@ class ServerConfigTest {
         assertEquals(8080, config.port)
         assertEquals(ServerConfig.DEFAULT_HISTORY_DEPTH, config.historyDepth)
         assertEquals(ServerConfig.DEFAULT_GTFS_REFRESH_INTERVAL_HOURS, config.gtfsRefreshIntervalHours)
+        assertEquals(20, config.gtfsMismatchPercent)
+    }
+
+    @Test
+    fun `the mismatch percent is configurable and validated`() {
+        assertEquals(35, config("GTFS_MISMATCH_PERCENT" to "35").gtfsMismatchPercent)
+        assertEquals(20, config("GTFS_MISMATCH_PERCENT" to "").gtfsMismatchPercent)
+        listOf("0", "101", "abc", "-5").forEach { bad ->
+            assertFailsWith<IllegalStateException> { config("GTFS_MISMATCH_PERCENT" to bad) }
+        }
     }
 
     @Test

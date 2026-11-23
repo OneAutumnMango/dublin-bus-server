@@ -19,6 +19,8 @@ data class ServerConfig(
     val gtfsBaseUrl: String,
     val allowUnsafePollRate: Boolean,
     val gtfsRefreshIntervalHours: Long,
+    /** Refresh the static bundle early when at least this percent of live trip updates have no trip in it. */
+    val gtfsMismatchPercent: Int = DEFAULT_GTFS_MISMATCH_PERCENT,
 ) {
     /**
      * One cycle spends `feeds.size` calls, and the pool provides `ntaApiKeys.size` calls per
@@ -43,6 +45,7 @@ data class ServerConfig(
     companion object {
         const val DEFAULT_HISTORY_DEPTH = 30
         const val DEFAULT_GTFS_REFRESH_INTERVAL_HOURS = 24L
+        const val DEFAULT_GTFS_MISMATCH_PERCENT = 20
 
         fun fromEnv(rawEnv: (String) -> String? = System::getenv): ServerConfig {
             // Compose and shell wrappers routinely pass "" for unset values; treat those as absent.
@@ -79,6 +82,10 @@ data class ServerConfig(
                     it.toLongOrNull()?.takeIf { hours -> hours >= 1 }
                         ?: error("GTFS_REFRESH_INTERVAL_HOURS must be a positive integer, got '$it'")
                 } ?: DEFAULT_GTFS_REFRESH_INTERVAL_HOURS,
+                gtfsMismatchPercent = env("GTFS_MISMATCH_PERCENT")?.let {
+                    it.toIntOrNull()?.takeIf { pct -> pct in 1..100 }
+                        ?: error("GTFS_MISMATCH_PERCENT must be an integer from 1 to 100, got '$it'")
+                } ?: DEFAULT_GTFS_MISMATCH_PERCENT,
             )
         }
 
