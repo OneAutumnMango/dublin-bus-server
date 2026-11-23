@@ -165,10 +165,13 @@ class StaticDataRefresherTest {
             tripIds.forEach { id ->
                 val trip = TripDescriptor.newBuilder().setTripId(id)
                 if (added) trip.scheduleRelationship = TripDescriptor.ScheduleRelationship.ADDED
-                b.addEntity(FeedEntity.newBuilder().setId(id)
+                b.addEntity(FeedEntity.newBuilder().setId("e${b.entityCount}")
                     .setTripUpdate(com.google.transit.realtime.GtfsRealtime.TripUpdate.newBuilder().setTrip(trip)))
             }
         }.build()
+
+    private fun bad() = feed(*Array(100) { "nope$it" })
+    private fun good() = feed(*Array(100) { "t1" })
 
     private suspend fun waitFor(cond: () -> Boolean) = withContext(Dispatchers.Default) {
         repeat(100) { if (!cond()) delay(50) }
@@ -178,21 +181,40 @@ class StaticDataRefresherTest {
     fun `observe launches a refresh after five consecutive polls with unmatched trips`() = runTest {
         val rig = Rig()
         rig.refresher.start(rig.scope)
-        repeat(4) { rig.refresher.observe(feed("nope1", "nope2", "nope3")) }
+        repeat(4) { rig.refresher.observe(bad()) }
         assertEquals(0, rig.runs)
-        rig.refresher.observe(feed("nope1", "nope2", "nope3"))
+        rig.refresher.observe(bad())
         waitFor { rig.runs == 1 }
         assertEquals(1, rig.runs)
-        assertEquals(3, rig.refresher.unmatchedTripUpdates)
+        assertEquals(100, rig.refresher.unmatchedTripUpdates)
     }
 
     @Test
     fun `a clean poll resets the streak`() = runTest {
         val rig = Rig()
         rig.refresher.start(rig.scope)
-        repeat(4) { rig.refresher.observe(feed("nope")) }
-        rig.refresher.observe(feed("t1"))
-        repeat(4) { rig.refresher.observe(feed("nope")) }
+        repeat(4) { rig.refresher.observe(bad()) }
+        rig.refresher.observe(good())
+        repeat(4) { rig.refresher.observe(bad()) }
+        waitFor { rig.runs > 0 }
+        assertEquals(0, rig.runs)
+    }
+
+    @Test
+    fun `the normal unmatched share seen on a healthy bundle does not trigger a refresh`() = runTest {
+        val rig = Rig()
+        rig.refresher.start(rig.scope)
+        repeat(8) { rig.refresher.observe(feed(*Array(91) { "t1" }, *Array(9) { "nope$it" })) }
+        waitFor { rig.runs > 0 }
+        assertEquals(0, rig.runs)
+        assertEquals(9, rig.refresher.unmatchedTripUpdates)
+    }
+
+    @Test
+    fun `a small poll is never judged, even if every trip is unmatched`() = runTest {
+        val rig = Rig()
+        rig.refresher.start(rig.scope)
+        repeat(8) { rig.refresher.observe(feed("nope1", "nope2", "nope3")) }
         waitFor { rig.runs > 0 }
         assertEquals(0, rig.runs)
     }
@@ -201,7 +223,7 @@ class StaticDataRefresherTest {
     fun `added trips are not counted as unmatched`() = runTest {
         val rig = Rig()
         rig.refresher.start(rig.scope)
-        repeat(6) { rig.refresher.observe(feed("extra1", "extra2", added = true)) }
+        repeat(6) { rig.refresher.observe(feed(*Array(100) { "extra$it" }, added = true)) }
         waitFor { rig.runs > 0 }
         assertEquals(0, rig.runs)
         assertEquals(0, rig.refresher.unmatchedTripUpdates)
@@ -211,14 +233,14 @@ class StaticDataRefresherTest {
     fun `cooldown blocks a second refresh within the cooldown`() = runTest {
         val rig = Rig()
         rig.refresher.start(rig.scope)
-        repeat(5) { rig.refresher.observe(feed("nope")) }
+        repeat(5) { rig.refresher.observe(bad()) }
         waitFor { rig.runs == 1 }
         rig.now += 3_600_000L
-        repeat(5) { rig.refresher.observe(feed("nope")) }
+        repeat(5) { rig.refresher.observe(bad()) }
         waitFor { rig.runs > 1 }
         assertEquals(1, rig.runs)
         rig.now += 6 * 3_600_000L
-        repeat(5) { rig.refresher.observe(feed("nope")) }
+        repeat(5) { rig.refresher.observe(bad()) }
         waitFor { rig.runs == 2 }
         assertEquals(2, rig.runs)
     }
@@ -227,9 +249,9 @@ class StaticDataRefresherTest {
     fun `a running refresh is not started twice`() = runTest {
         val rig = Rig(cooldownMs = 0, scriptBody = "sleep 1\ncp '\$(dirname \"\$0\")/fixture.json' \"\$2\"")
         rig.refresher.start(rig.scope)
-        repeat(5) { rig.refresher.observe(feed("nope")) }
+        repeat(5) { rig.refresher.observe(bad()) }
         waitFor { rig.runs == 1 }
-        repeat(5) { rig.refresher.observe(feed("nope")) }
+        repeat(5) { rig.refresher.observe(bad()) }
         waitFor { rig.runs > 1 }
         assertEquals(1, rig.runs)
     }

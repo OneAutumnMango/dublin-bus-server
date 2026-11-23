@@ -14,7 +14,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val DEFAULT_SCRIPT_PATH = "scripts/fetch-gtfs-data.sh"
 private const val STREAK_POLLS = 5
-private const val MIN_UNMATCHED = 1
+// Measured on the Pi: ~9% of live trip updates are unmatched on a correct bundle (operators the filter drops),
+// 83% when NTA changed its ids. 40% sits between; the minimum count keeps quiet night polls from tripping it.
+private const val MIN_UNMATCHED_FRACTION = 0.4
+private const val MIN_TRIP_UPDATES = 100
 private const val COOLDOWN_MS = 6 * 3_600_000L
 private val NOT_IN_STATIC = setOf("ADDED", "NEW")
 
@@ -33,7 +36,8 @@ class StaticDataRefresher(
     private val scriptPath: String = DEFAULT_SCRIPT_PATH,
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val streakPolls: Int = STREAK_POLLS,
-    private val minUnmatched: Int = MIN_UNMATCHED,
+    private val minUnmatchedFraction: Double = MIN_UNMATCHED_FRACTION,
+    private val minTripUpdates: Int = MIN_TRIP_UPDATES,
     private val cooldownMs: Long = COOLDOWN_MS,
 ) {
     private val logger = LoggerFactory.getLogger(StaticDataRefresher::class.java)
@@ -56,14 +60,12 @@ class StaticDataRefresher(
     @Synchronized
     fun observe(feed: FeedMessage) {
         val data = target.current
-        unmatchedTripUpdates = feed.entityList.count { e ->
-            e.hasTripUpdate() && e.tripUpdate.trip.let { t ->
-                // Added trips are not in the static data by design. Compared by name so a newer
-                // protobuf enum (NEW) needs no code change.
-                t.scheduleRelationship.name !in NOT_IN_STATIC && data.trip(t.tripId) == null
-            }
-        }
-        streak = if (unmatchedTripUpdates >= minUnmatched) streak + 1 else 0
+        // Added trips are not in the static data by design. Compared by name so a newer protobuf
+        // enum (NEW) needs no code change.
+        val considered = feed.entityList.filter { it.hasTripUpdate() && it.tripUpdate.trip.scheduleRelationship.name !in NOT_IN_STATIC }
+        unmatchedTripUpdates = considered.count { data.trip(it.tripUpdate.trip.tripId) == null }
+        val bad = considered.size >= minTripUpdates && unmatchedTripUpdates >= considered.size * minUnmatchedFraction
+        streak = if (bad) streak + 1 else 0
         val scope = scope ?: return
         if (streak < streakPolls || nowMs() - lastRefreshEpochMs < cooldownMs) return
         streak = 0
