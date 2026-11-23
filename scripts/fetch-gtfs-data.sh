@@ -2,7 +2,7 @@
 #
 # Downloads the static TFI/NTA GTFS feed and filters it down to the stops served by
 # the operators covered by the GTFS-Realtime API (Dublin Bus, Bus Éireann, Go-Ahead
-# Ireland), writing a compact JSON resource the server bundles and reads at startup.
+# Ireland, Luas, Irish Rail), writing a compact JSON resource the server bundles and reads at startup.
 #
 #   ./scripts/fetch-gtfs-data.sh          # fetch + filter (re-run to refresh)
 #   ./scripts/fetch-gtfs-data.sh --check  # report whether the resource is present
@@ -16,7 +16,7 @@ set -euo pipefail
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly GTFS_URL="https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip"
 OUT_FILE="${GTFS_STATIC_PATH:-$REPO_ROOT/src/main/resources/gtfs_static.json}"
-readonly AGENCY_NAME_PATTERN="${GTFS_AGENCY_PATTERN:-Dublin Bus|Bus.?Éireann|Bus.?Eireann|Go.?Ahead}"
+readonly AGENCY_NAME_PATTERN="${GTFS_AGENCY_PATTERN:-Dublin Bus|Bus.?Éireann|Bus.?Eireann|Go.?Ahead|LUAS|Irish Rail}"
 
 CHECK_ONLY=0
 FILTER_FLAGS=()

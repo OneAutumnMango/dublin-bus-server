@@ -44,6 +44,8 @@ data class ArrivalResponse(
     val hasGps: Boolean = false,
     /** Omitted from the JSON unless true, so default responses are unchanged for existing clients. */
     val cancelled: Boolean? = null,
+    /** "tram" or "rail"; omitted for buses. */
+    val mode: String? = null,
 )
 
 @Serializable
@@ -52,6 +54,7 @@ data class RouteResponse(
     val shortName: String,
     val longName: String,
     val agencyId: String,
+    val mode: String? = null,
 )
 
 @Serializable
@@ -188,9 +191,10 @@ fun Arrival.toResponse() = ArrivalResponse(
     started = started,
     hasGps = hasGps,
     cancelled = cancelled.takeIf { it },
+    mode = mode,
 )
 
-fun Route.toResponse() = RouteResponse(id, shortName, longName, agencyId)
+fun Route.toResponse() = RouteResponse(id, shortName, longName, agencyId, mode)
 
 fun VehiclePosition.toResponse() = VehicleResponse(
     vehicleId = vehicleId,

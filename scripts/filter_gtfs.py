@@ -182,7 +182,13 @@ def main():
 
     routes = [r for r in read_csv(f"{args.gtfs_dir}/routes.txt") if r["agency_id"] in agency_ids]
     route_ids = {r["route_id"] for r in routes}
-    route_short_names = {r["route_id"]: r.get("route_short_name") or r["route_id"] for r in routes}
+    # Tram (0), metro (1) and rail (2) routes share short names like "rail" or "Commuter", so they are
+    # named by their long name ("Dublin - Galway"); buses keep their number.
+    route_short_names = {
+        r["route_id"]: (r.get("route_long_name") if r.get("route_type") in ("0", "1", "2") else None)
+        or r.get("route_short_name") or r["route_id"]
+        for r in routes
+    }
 
     trips = [r for r in read_csv(f"{args.gtfs_dir}/trips.txt") if r["route_id"] in route_ids]
     trip_route = {r["trip_id"]: r["route_id"] for r in trips}
@@ -230,6 +236,7 @@ def main():
                 "shortName": route_short_names[r["route_id"]],
                 "longName": r.get("route_long_name", ""),
                 "agencyId": r["agency_id"],
+                "type": int(r.get("route_type") or 3),  # GTFS route_type: 0 tram, 2 rail, 3 bus
             }
             for r in sorted(routes, key=lambda r: route_short_names[r["route_id"]])
         ],

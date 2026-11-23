@@ -15,7 +15,12 @@ data class Route(
     val shortName: String,
     val longName: String,
     val agencyId: String,
-)
+    /** GTFS route_type: 0 tram, 1 metro, 2 rail, 3 bus (the default for older bundles). */
+    val type: Int = 3,
+) {
+    /** "tram" or "rail"; null for buses, so bus responses are unchanged. */
+    val mode: String? get() = when (type) { 0 -> "tram"; 1, 2 -> "rail"; else -> null }
+}
 
 /** A scheduled trip, from the static feed. */
 data class Trip(
@@ -48,6 +53,8 @@ data class Arrival(
     val hasGps: Boolean = false,
     /** The trip is cancelled, or skips this stop; its scheduled time is kept. Only built on request. */
     val cancelled: Boolean = false,
+    /** "tram" or "rail" for Luas and Irish Rail; null for buses. */
+    val mode: String? = null,
 )
 
 /** Where a bus is right now, from the Vehicles feed. */

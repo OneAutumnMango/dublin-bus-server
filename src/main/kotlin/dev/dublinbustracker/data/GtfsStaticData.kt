@@ -24,6 +24,7 @@ private data class RouteDto(
     val shortName: String,
     val longName: String = "",
     val agencyId: String = "",
+    val type: Int = 3,
 )
 
 @Serializable
@@ -114,6 +115,8 @@ class GtfsStaticData private constructor(
 
     fun routeShortName(routeId: String): String = routesById[routeId]?.shortName ?: routeId
 
+    fun routeMode(routeId: String): String? = routesById[routeId]?.mode
+
     fun routesServingStop(stopId: String): List<String> = stopRoutes[stopId].orEmpty()
 
     /** Ordered stop ids for a route, keyed by direction id. */
@@ -178,7 +181,7 @@ class GtfsStaticData private constructor(
         private fun build(dto: BundleDto): GtfsStaticData {
             return GtfsStaticData(
                 stops = dto.stops.map { Stop(it.id, it.code, it.name, it.lat, it.lon) },
-                routes = dto.routes.map { Route(it.id, it.shortName, it.longName, it.agencyId) },
+                routes = dto.routes.map { Route(it.id, it.shortName, it.longName, it.agencyId, it.type) },
                 trips = dto.trips.mapValues { (id, t) ->
                     Trip(id, t.routeId, t.headsign, t.directionId, t.shapeId, t.serviceId)
                 },

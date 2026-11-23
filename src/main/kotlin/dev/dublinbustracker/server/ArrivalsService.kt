@@ -214,6 +214,7 @@ class ArrivalsService(
             .map { (scheduled, epoch) ->
                 Arrival(
                     routeShortName = staticData.current.routeShortName(trip.routeId),
+                    mode = staticData.current.routeMode(trip.routeId),
                     destination = trip.headsign,
                     dueMinutes = ((epoch - now) / 60).toInt().coerceAtLeast(0),
                     isRealtime = true,
@@ -296,6 +297,7 @@ class ArrivalsService(
 
                 Arrival(
                     routeShortName = staticData.current.routeShortName(trip.routeId),
+                    mode = staticData.current.routeMode(trip.routeId),
                     destination = trip.headsign,
                     dueMinutes = ((epoch - now) / 60).toInt().coerceAtLeast(0),
                     isRealtime = false,
@@ -329,6 +331,7 @@ class ArrivalsService(
                 if (event.time < now - PAST_VISIBLE_SECONDS) return@mapNotNull null
                 Arrival(
                     routeShortName = staticData.current.routeShortName(routeId),
+                    mode = staticData.current.routeMode(routeId),
                     destination = trip?.headsign.orEmpty(),
                     dueMinutes = ((event.time - now) / 60).toInt().coerceAtLeast(0),
                     isRealtime = true,

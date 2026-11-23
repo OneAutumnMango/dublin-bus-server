@@ -465,6 +465,20 @@ class ArrivalsServiceTest {
     }
 
     @Test
+    fun `tram and rail arrivals carry a mode, buses do not`() {
+        val bundle = twoStopBundle().replace("\"agencyId\":\"a1\"}]", "\"agencyId\":\"a1\",\"type\":0}]")
+        val svc = ArrivalsService(FeedStore(historyDepth = 5), StaticDataRef(GtfsStaticData.parse(bundle)), nowEpochSeconds = { wednesdayMorning })
+        val tram = svc.arrivalsForStop("s1").single()
+        assertEquals("tram", tram.mode)
+        assertEquals("tram", tram.toResponse().mode)
+
+        val (_, busSvc) = twoStopService()
+        assertNull(busSvc.arrivalsForStop("s1").single().mode)
+        val json = kotlinx.serialization.json.Json { encodeDefaults = true; explicitNulls = false }
+        assertFalse("mode" in json.encodeToString(ArrivalResponse.serializer(), busSvc.arrivalsForStop("s1").single().toResponse()))
+    }
+
+    @Test
     fun `a trip reported live at one stop cascades its delay to another stop's schedule`() {
         val (store, svc) = twoStopService()
         store.record(

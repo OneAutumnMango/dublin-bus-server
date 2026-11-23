@@ -9,7 +9,7 @@ It polls the NTA GTFS-Realtime feeds on its own rate-limited schedule, keeps the
 memory, and answers questions about them. Clients get an ordinary JSON API with no rate limit
 of their own, because one upstream poll serves every client and every stop.
 
-Covers Dublin Bus, Bus Éireann and Go-Ahead Ireland.
+Covers Dublin Bus, Bus Éireann and Go-Ahead Ireland, plus Luas and Irish Rail (DART, commuter and intercity). Rail and tram arrivals are scheduled times plus the live trip updates NTA publishes; the feed has no train or tram positions, so there is no GPS for them. Override which operators are bundled with `GTFS_AGENCY_PATTERN` (a regex on the agency name).
 
 ## Quick start (Docker)
 
@@ -182,8 +182,8 @@ curl "localhost:8080/v1/vehicles/226/history"    # where one has been
 
 Memory: the bundle is parsed into millions of objects, and a refresh briefly holds the old and new bundles together, so size the container's RAM for two copies (the JVM may use 75% of it by default, see `JAVA_OPTS`).
 
-`scripts/fetch-gtfs-data.sh` downloads the ~700MB static GTFS zip and filters it to the three
-agencies, producing a JSON bundle of roughly 230MB (about 210MB of it the per-stop timetable). `shapes.txt` and `stop_times.txt` dominate that zip,
+`scripts/fetch-gtfs-data.sh` downloads the ~700MB static GTFS zip and filters it to the bundled
+agencies (see `GTFS_AGENCY_PATTERN`), producing a JSON bundle of roughly 230MB (about 210MB of it the per-stop timetable). `shapes.txt` and `stop_times.txt` dominate that zip,
 so the script deduplicates and polyline-encodes shapes, and reduces stop times to one
 representative stop pattern per route and direction rather than retaining all 248k trips'
 timetables. Use `--no-shapes` or `--no-patterns` for a smaller bundle.

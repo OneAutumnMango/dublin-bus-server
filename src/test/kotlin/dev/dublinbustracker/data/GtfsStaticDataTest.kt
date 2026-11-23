@@ -154,4 +154,16 @@ class GtfsStaticDataTest {
     fun `an unknown service is never active`() {
         assertFalse(data.isServiceActive("ghost", LocalDate.of(2024, 1, 1)))
     }
+
+    @Test
+    fun `a route's mode comes from its GTFS type and is absent for buses and older bundles`() {
+        val data = GtfsStaticData.parse(
+            """{"version":3,"routes":[
+              {"id":"bus","shortName":"15","type":3},
+              {"id":"luas","shortName":"Parnell - Brides Glen","type":0},
+              {"id":"dart","shortName":"Bray - Howth","type":2},
+              {"id":"old","shortName":"7"}]}""",
+        )
+        assertEquals(listOf(null, "tram", "rail", null), listOf("bus", "luas", "dart", "old").map { data.routeMode(it) })
+    }
 }
