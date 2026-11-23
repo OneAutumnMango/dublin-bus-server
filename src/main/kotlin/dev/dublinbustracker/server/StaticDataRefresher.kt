@@ -1,5 +1,6 @@
 package dev.dublinbustracker.server
 
+import com.google.transit.realtime.GtfsRealtime.FeedMessage
 import dev.dublinbustracker.data.StaticDataRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,8 +10,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val DEFAULT_SCRIPT_PATH = "scripts/fetch-gtfs-data.sh"
+private const val STREAK_POLLS = 5
+private const val MIN_UNMATCHED = 1
+private const val COOLDOWN_MS = 6 * 3_600_000L
+private val NOT_IN_STATIC = setOf("ADDED", "NEW")
 
 /**
  * Periodically re-downloads and re-filters the static GTFS bundle by shelling out to
@@ -25,8 +31,55 @@ class StaticDataRefresher(
     private val notifier: NtfyNotifier = NtfyNotifier(null, NtfyLevel.OFF),
     private val intervalMs: Long,
     private val scriptPath: String = DEFAULT_SCRIPT_PATH,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+    private val streakPolls: Int = STREAK_POLLS,
+    private val minUnmatched: Int = MIN_UNMATCHED,
+    private val cooldownMs: Long = COOLDOWN_MS,
 ) {
     private val logger = LoggerFactory.getLogger(StaticDataRefresher::class.java)
+    private var scope: CoroutineScope? = null
+    private var streak = 0
+    private val running = AtomicBoolean(false)
+
+    /** Trip updates in the latest observed feed that the current bundle has no trip for. */
+    @Volatile var unmatchedTripUpdates = 0
+        private set
+
+    /** When the last refresh attempt (timer or detector) started; 0 if none yet. */
+    @Volatile var lastRefreshEpochMs = 0L
+        private set
+
+    /**
+     * Called after each TRIP_UPDATES poll. A bundle the live feed no longer matches (NTA changed its
+     * ids) shows up as trips we don't know; after [streakPolls] such polls in a row, refresh.
+     */
+    @Synchronized
+    fun observe(feed: FeedMessage) {
+        val data = target.current
+        unmatchedTripUpdates = feed.entityList.count { e ->
+            e.hasTripUpdate() && e.tripUpdate.trip.let { t ->
+                // Added trips are not in the static data by design. Compared by name so a newer
+                // protobuf enum (NEW) needs no code change.
+                t.scheduleRelationship.name !in NOT_IN_STATIC && data.trip(t.tripId) == null
+            }
+        }
+        streak = if (unmatchedTripUpdates >= minUnmatched) streak + 1 else 0
+        val scope = scope ?: return
+        if (streak < streakPolls || nowMs() - lastRefreshEpochMs < cooldownMs) return
+        streak = 0
+        logger.warn("{} live trip updates have no trip in the static bundle for {} polls; refreshing it", unmatchedTripUpdates, streakPolls)
+        scope.launch { attempt() }
+    }
+
+    private suspend fun attempt() {
+        if (!running.compareAndSet(false, true)) return
+        try {
+            lastRefreshEpochMs = nowMs()
+            refresh()
+        } finally {
+            running.set(false)
+        }
+    }
 
     suspend fun refresh() = withContext(Dispatchers.IO) {
         if (!File(scriptPath).isFile) {
@@ -50,6 +103,7 @@ class StaticDataRefresher(
     }
 
     fun start(scope: CoroutineScope) {
+        this.scope = scope
         scope.launch {
             // The first wait is what is left of the bundle's age, so restarts don't push a stale bundle
             // another full interval out (0 if it's already older: refresh straight away).
@@ -57,7 +111,7 @@ class StaticDataRefresher(
             var wait = if (File(outputPath).isFile) (intervalMs - ageMs).coerceIn(0, intervalMs) else intervalMs
             while (isActive) {
                 delay(wait)
-                refresh()
+                attempt()
                 wait = intervalMs
             }
         }
