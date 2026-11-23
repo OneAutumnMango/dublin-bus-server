@@ -191,7 +191,7 @@ NTA revises the static schedule periodically, and when it does, the GTFS-Realtim
 ids stop matching the bundle - trip headsigns go blank and `/v1/trips/{id}` 404s, even though
 stops, routes and vehicle positions are unaffected (they resolve by route/stop id, not trip id).
 The server re-runs this same pipeline on its own every `GTFS_REFRESH_INTERVAL_HOURS` (default
-24, counted from the bundle file's age, so restarts don't delay it) and hot-swaps the result in, so this self-heals without a restart. It also refreshes early when the live feed has trips the bundle doesn't know for 5 polls in a row (at least 40% of 100+ trip updates; about 9% is normal; at most once per 6 hours); `/v1/status` shows `unmatchedTripUpdates` and `lastStaticRefreshEpochMs`. A failed refresh just
+24, counted from the bundle file's age, so restarts don't delay it) and hot-swaps the result in, so this self-heals without a restart. It also refreshes early when the live feed has trips the bundle doesn't know for 5 polls in a row (at least 20% of 100+ trip updates; about 9% is normal; at most once per 6 hours); `/v1/status` shows `unmatchedTripUpdates` and `lastStaticRefreshEpochMs`. A failed refresh just
 logs (and pushes a `warn`-level alert if `NTFY_URL` is set) and keeps serving the old bundle.
 
 ## Notes

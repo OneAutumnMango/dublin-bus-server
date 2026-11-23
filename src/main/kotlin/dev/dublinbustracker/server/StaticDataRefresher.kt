@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 private const val DEFAULT_SCRIPT_PATH = "scripts/fetch-gtfs-data.sh"
 private const val STREAK_POLLS = 5
 // Measured on the Pi: ~9% of live trip updates are unmatched on a correct bundle (operators the filter drops),
-// 83% when NTA changed its ids. 40% sits between; the minimum count keeps quiet night polls from tripping it.
-private const val MIN_UNMATCHED_FRACTION = 0.4
+// 83% when NTA changed its ids. 20% leaves margin over a possibly higher-than-usual 9%; the minimum count keeps quiet night polls from tripping it.
+private const val MIN_UNMATCHED_FRACTION = 0.2
 private const val MIN_TRIP_UPDATES = 100
 private const val COOLDOWN_MS = 6 * 3_600_000L
 private val NOT_IN_STATIC = setOf("ADDED", "NEW")
